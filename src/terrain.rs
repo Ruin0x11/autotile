@@ -25,12 +25,12 @@ impl Terrain {
         }
     }
 
-    pub fn n(&self) -> u32 {
+    pub fn n(&self) -> usize {
         match *self {
-            Terrain::Wall => 12,
-            Terrain::Floor => 4,
-            Terrain::Important => 29,
-            Terrain::Nothing => 31,
+            Terrain::Wall => 0,
+            Terrain::Floor => 0,
+            Terrain::Important => 0,
+            Terrain::Nothing => 0,
         }
     }
 

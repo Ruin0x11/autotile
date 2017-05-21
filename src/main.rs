@@ -2,11 +2,13 @@ extern crate cgmath;
 #[macro_use] extern crate glium;
 extern crate image;
 extern crate rand;
+extern crate texture_packer;
 
 mod board;
 mod point;
 mod terrain;
 mod texture_atlas;
+mod atlas_frame;
 mod tilemap;
 
 use std::thread;
@@ -24,6 +26,7 @@ use tilemap::Tilemap;
 const SCREEN_WIDTH: u32 = 800;
 const SCREEN_HEIGHT: u32 = 600;
 
+#[derive(Debug)]
 pub struct Viewport {
     position: (u32, u32),
     size: (u32, u32),
@@ -37,13 +40,18 @@ pub trait Renderable {
 fn main() {
     let display = glutin::WindowBuilder::new()
         .with_vsync()
+        .with_dimensions(SCREEN_WIDTH, SCREEN_HEIGHT)
         .build_glium()
         .unwrap();
 
     let mut board = Board::new(20, 20, Terrain::Wall);
 
-    for pos in RectangleIter::new(Point::new(4, 4), Point::new(8, 8)) {
+    for pos in RectangleIter::new(Point::new(2, 2), Point::new(8, 8)) {
         board.set(&pos, Terrain::Floor);
+    }
+
+    for pos in RectangleIter::new(Point::new(6, 6), Point::new(10, 10)) {
+        board.set(&pos, Terrain::Important);
     }
 
     board.set(&Point::new(6, 6), Terrain::Wall);

@@ -1,13 +1,13 @@
 use glium;
 use glium::backend::Facade;
 use glium::index::PrimitiveType;
-use image;
 use cgmath;
 
 use board::Board;
 use point::Direction;
 use point::Point;
 use point;
+use atlas_frame::*;
 
 #[derive(Copy, Clone)]
 struct Vertex {
@@ -36,10 +36,8 @@ const QUAD: [Vertex; 4] = [
     Vertex { position: [1, 0], },
 ];
 
-type Texture2d = glium::texture::CompressedSrgbTexture2d;
-
 struct DrawTile {
-    tile_idx: u32,
+    tile_idx: usize,
     edges: u8,
 }
 
@@ -50,7 +48,7 @@ pub struct Tilemap {
     vertices: glium::VertexBuffer<Vertex>,
     program: glium::Program,
 
-    texture: Texture2d,
+    tile_manager: TileManager,
     tex_ratio: [f32; 2],
 }
 
@@ -97,7 +95,7 @@ fn get_neighboring_edges(map: &Board, pos: Point) -> u8 {
     println!("Done");
     res
 }
- 
+
 const QUAD_NW: i8 = 0;
 const QUAD_NE: i8 = 1;
 const QUAD_SW: i8 = 2;
@@ -173,10 +171,9 @@ fn read_string(path: &str) -> String {
 
 impl Tilemap {
     pub fn new<F: Facade>(display: &F, map: &Board, image_filename: &str) -> Self {
-        let image = (image::open(image_filename)).unwrap().to_rgba();
-        let dimensions = image.dimensions();
-        let image = glium::texture::RawImage2d::from_raw_rgba_reversed(image.into_raw(), dimensions);
-        let texture = (Texture2d::new(display, image)).unwrap();
+        let tile_manager = TileManagerBuilder::new()
+            .add_tile(image_filename, 0, AtlasTile { offset: (12, 0), is_autotile: true } )
+            .build(display);
 
         let vertices = glium::VertexBuffer::immutable(display, &QUAD).unwrap();
         let indices = glium::IndexBuffer::immutable(display, PrimitiveType::TrianglesList, &QUAD_INDICES).unwrap();
@@ -185,8 +182,8 @@ impl Tilemap {
         let fragment_shader = read_string("./data/tile.frag");
         let program = glium::Program::from_source(display, &vertex_shader, &fragment_shader, None).unwrap();
 
-        let cols = dimensions.0 / (48 / 2);
-        let rows = dimensions.1 / (48 / 2);
+        let cols: u32 = 2048 / (48 / 2);
+        let rows: u32 = 2048 / (48 / 2);
 
         let tex_ratio = [1.0 / cols as f32, 1.0 / rows as f32];
 
@@ -197,28 +194,25 @@ impl Tilemap {
             indices: indices,
             vertices: vertices,
             program: program,
-            texture: texture,
+            tile_manager: tile_manager,
             tex_ratio: tex_ratio,
         }
     }
 
-    fn create_instances<F>(&self, display: &F) -> glium::VertexBuffer<Instance>
+    fn create_instances<F>(&self, display: &F, pass: usize) -> glium::VertexBuffer<Instance>
         where F: glium::backend::Facade {
 
-        let get_tex_coords = |n: u32| {
-            let cols = 32;
-            let tx = (n % cols) as f32 * self.tex_ratio[0];
-            let ty = (n / cols) as f32 * self.tex_ratio[1];
-            (tx, ty)
-        };
-
         let data = self.map.iter()
+            .filter(|&&(ref tile, _)| {
+                let texture_idx = self.tile_manager.get_tile_texture_idx(tile.tile_idx);
+                texture_idx == pass
+            })
             .flat_map(|&(ref tile, c)| {
                 let mut res = Vec::new();
                 for quadrant in 0..4 {
                     let (x, y) = (c.x, c.y);
 
-                    let (tx, ty) = get_tex_coords(tile.tile_idx);
+                    let (tx, ty) = self.tile_manager.get_texture_offset(tile.tile_idx);
                     let autotile_index = get_autotile_index(tile.edges, quadrant);
 
                     res.push(Instance { map_coord: [x as u32, y as u32],
@@ -241,32 +235,37 @@ impl<'a> ::Renderable for Tilemap {
         let (w, h) = (viewport.size.0 as f32, viewport.size.1 as f32);
         let proj: [[f32; 4]; 4] = cgmath::ortho(0.0, w, h, 0.0, -1.0, 1.0).into();
 
-        let uniforms = uniform! {
-            matrix: proj,
-            tile_size: [48u32; 2],
-            tex: self.texture.sampled()
-                .wrap_function(glium::uniforms::SamplerWrapFunction::Clamp)
-                .minify_filter(glium::uniforms::MinifySamplerFilter::Nearest)
-                .magnify_filter(glium::uniforms::MagnifySamplerFilter::Nearest),
-            tex_ratio: self.tex_ratio,
-        };
+        for pass in 0..self.tile_manager.passes() {
+            let texture = self.tile_manager.get_texture(pass);
+            let tex_ratio = self.tile_manager.get_tex_ratio(pass);
 
-        let instances = self.create_instances(display);
+            let uniforms = uniform! {
+                matrix: proj,
+                tile_size: [48u32; 2],
+                tex: texture.sampled()
+                    .wrap_function(glium::uniforms::SamplerWrapFunction::Clamp)
+                    .minify_filter(glium::uniforms::MinifySamplerFilter::Nearest)
+                    .magnify_filter(glium::uniforms::MagnifySamplerFilter::Nearest),
+                tex_ratio: tex_ratio,
+            };
 
-        // TODO move to arguments?
-        let params = glium::DrawParameters {
-            // viewport: {
-            //     let (x, y) = viewport.position;
-            //     let (w, h) = viewport.size;
-            //     Some(glium::Rect { left: x, bottom: y, width: w, height: h })
-            // },
-            .. Default::default()
-        };
+            let instances = self.create_instances(display, pass);
 
-        target.draw((&self.vertices, instances.per_instance().unwrap()),
-                    &self.indices,
-                    &self.program,
-                    &uniforms,
-                    &params).unwrap();
+            // TODO move to arguments?
+            let params = glium::DrawParameters {
+                viewport: {
+                    let (x, y) = viewport.position;
+                    let (w, h) = viewport.size;
+                    Some(glium::Rect { left: x, bottom: y, width: w, height: h })
+                },
+                .. Default::default()
+            };
+
+            target.draw((&self.vertices, instances.per_instance().unwrap()),
+                        &self.indices,
+                        &self.program,
+                        &uniforms,
+                        &params).unwrap();
+        }
     }
 }
