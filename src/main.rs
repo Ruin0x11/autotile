@@ -4,17 +4,20 @@ extern crate image;
 extern crate rand;
 extern crate texture_packer;
 
+mod background;
 mod board;
 mod point;
 mod terrain;
 mod texture_atlas;
 mod atlas_frame;
 mod tilemap;
+mod util;
 
 use std::thread;
 use std::time::{Duration, Instant};
 
 use glium::glutin;
+use glium::glutin::{VirtualKeyCode, ElementState};
 use glium::{DisplayBuild, Surface};
 
 use point::{Point, RectangleIter};
@@ -30,11 +33,17 @@ const SCREEN_HEIGHT: u32 = 600;
 pub struct Viewport {
     position: (u32, u32),
     size: (u32, u32),
+    camera: (i32, i32),
 }
 
 pub trait Renderable {
     fn render<F, S>(&self, display: &F, target: &mut S, viewport: &Viewport)
         where F: glium::backend::Facade, S: glium::Surface;
+}
+
+fn get_duration_millis(duration: &Duration) -> u64 {
+    let nanos = duration.subsec_nanos() as u64;
+    (1000*1000*1000 * duration.as_secs() + nanos)/(1000 * 1000)
 }
 
 fn main() {
@@ -62,11 +71,15 @@ fn main() {
 
     let tile = Tilemap::new(&display, &board, "./data/map.png");
 
-    let mut viewport = Viewport { position: (0, 0), size: (SCREEN_WIDTH, SCREEN_HEIGHT) };
+    let mut viewport = Viewport { position: (0, 0), size: (SCREEN_WIDTH, SCREEN_HEIGHT), camera: (0, 0) };
 
-    start_loop(|| {
+    start_loop(|duration| {
         let mut target = display.draw();
         target.clear_color_and_depth((0.0, 0.0, 0.0, 0.0), 1.0);
+
+        let millis = get_duration_millis(duration);
+        background::render_background(&display, &mut target, &viewport, millis);
+
         tile.render(&display, &mut target, &viewport);
         target.finish().unwrap();
 
@@ -75,7 +88,25 @@ fn main() {
             match event {
                 glutin::Event::Closed => return Action::Stop,
                 glutin::Event::Resized(w, h) => {
-                    viewport = Viewport { position: (0, 0), size: (w, h) };
+                    viewport = Viewport { position: (0, 0), size: (w, h), camera: (0, 0) };
+                },
+                glutin::Event::KeyboardInput(ElementState::Pressed, _, Some(code)) => {
+                    println!("Key: {:?}", code);
+                    match code {
+                        VirtualKeyCode::Left => {
+                            viewport.camera.0 -= 48;
+                        },
+                        VirtualKeyCode::Up => {
+                            viewport.camera.1 -= 48;
+                        },
+                        VirtualKeyCode::Down => {
+                            viewport.camera.1 += 48;
+                        },
+                        VirtualKeyCode::Right => {
+                            viewport.camera.0 += 48;
+                        },
+                        _ => (),
+                    }
                 },
                 _ => ()
             }
@@ -89,12 +120,15 @@ pub enum Action {
     Continue,
 }
 
-pub fn start_loop<F>(mut callback: F) where F: FnMut() -> Action {
+pub fn start_loop<F>(mut callback: F) where F: FnMut(&Duration) -> Action {
+    let start = Instant::now();
+    let mut frame_count: u32 = 0;
+    let mut last_time: u64 = 0;
     let mut accumulator = Duration::new(0, 0);
     let mut previous_clock = Instant::now();
 
     loop {
-        match callback() {
+        match callback(&Instant::now().duration_since(start)) {
             Action::Stop => break,
             Action::Continue => ()
         };
@@ -110,6 +144,18 @@ pub fn start_loop<F>(mut callback: F) where F: FnMut() -> Action {
             // if you have a game, update the state here
         }
 
+        let millis = get_duration_millis(&Instant::now().duration_since(start));
+
+        if millis - last_time >= 1000 { // If last prinf() was more than 1 sec ago
+            // printf and reset timer
+            let ms_per_frame = 1000/frame_count;
+            println!("{} ms/frame | {} fps", ms_per_frame, 1000 / ms_per_frame);
+            frame_count = 0;
+            last_time += 1000;
+        }
+
         thread::sleep(fixed_time_stamp - accumulator);
+
+        frame_count += 1;
     }
 }

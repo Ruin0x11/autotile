@@ -115,6 +115,7 @@ impl <'a> TileManagerBuilder<'a> {
             allow_rotation: false,
             texture_outlines: false,
             trim: false,
+            texture_padding: 0,
             ..Default::default()
         };
 
@@ -173,13 +174,12 @@ impl TileManager {
 
         let get_tex_coords = |index: (u32, u32)| {
             let tex_ratio = self.get_tex_ratio(frame.texture_idx);
+            let add_offset = get_add_offset(&frame.rect);
 
-            let tx = index.0 as f32 * tex_ratio[0];
-            let ty = index.1 as f32 * tex_ratio[1];
-            let addx = frame.rect.x as f32 * tex_ratio[0];
-            let addy = frame.rect.y as f32 * tex_ratio[1];
+            let tx = ((index.0 + add_offset.0) * 2) as f32 * tex_ratio[0];
+            let ty = ((index.1 + add_offset.1) * 2) as f32 * tex_ratio[1];
 
-            (tx + addx, ty + addy)
+            (tx, ty)
         };
 
         let offset = frame.offsets.get(&tile_type).unwrap().offset;
@@ -195,3 +195,8 @@ impl TileManager {
     }
 }
 
+fn get_add_offset(rect: &Rect) -> (u32, u32) {
+    let cols: u32 = rect.x / 48;
+    let rows: u32 = rect.y / 48;
+    (cols, rows)
+}

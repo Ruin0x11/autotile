@@ -8,10 +8,11 @@ use point::Direction;
 use point::Point;
 use point;
 use atlas_frame::*;
+use util;
 
 #[derive(Copy, Clone)]
-struct Vertex {
-    position: [u32; 2],
+pub struct Vertex {
+    pub position: [i32; 2],
 }
 
 implement_vertex!(Vertex, position);
@@ -28,8 +29,8 @@ struct Instance {
 implement_vertex!(Instance, map_coord, tex_offset, quadrant, autotile,
                   autotile_index);
 
-const QUAD_INDICES: [u16; 6] = [0, 1, 2, 1, 3, 2];
-const QUAD: [Vertex; 4] = [
+pub const QUAD_INDICES: [u16; 6] = [0, 1, 2, 1, 3, 2];
+pub const QUAD: [Vertex; 4] = [
     Vertex { position: [0, 1], },
     Vertex { position: [1, 1], },
     Vertex { position: [0, 0], },
@@ -49,7 +50,6 @@ pub struct Tilemap {
     program: glium::Program,
 
     tile_manager: TileManager,
-    tex_ratio: [f32; 2],
 }
 
 fn make_map(map: &Board) -> Vec<(DrawTile, Point)> {
@@ -104,9 +104,9 @@ const QUAD_SE: i8 = 3;
 use point::Direction::*;
 
 fn get_autotile_index(edges: u8, quadrant: i8) -> i8 {
-    let check_dir = |dir: Direction| (edges & (1 << dir_to_bit(dir))) > 0;
+    let is_connected = |dir: Direction| (edges & (1 << dir_to_bit(dir))) > 0;
 
-    if !check_dir(N) && !check_dir(W) && !check_dir(E) && !check_dir(S) {
+    if !is_connected(N) && !is_connected(W) && !is_connected(E) && !is_connected(S) {
         let ret = match quadrant {
             QUAD_NW => {
                 0
@@ -127,14 +127,14 @@ fn get_autotile_index(edges: u8, quadrant: i8) -> i8 {
 
     // The tiles are in order from the corner inside.
     let lookup_tile_idx = |horiz: Direction, vert: Direction, corner: Direction, tiles: [i8; 4], corner_piece: i8| {
-        if !check_dir(horiz) && !check_dir(vert) {
+        if !is_connected(horiz) && !is_connected(vert) {
             tiles[0]
-        } else if !check_dir(horiz) && check_dir(vert) {
+        } else if !is_connected(horiz) && is_connected(vert) {
             tiles[1]
-        } else if check_dir(horiz) && !check_dir(vert) {
+        } else if is_connected(horiz) && !is_connected(vert) {
             tiles[2]
         } else {
-            if !check_dir(corner) {
+            if !is_connected(corner) {
                 corner_piece
             } else {
                 tiles[3]
@@ -159,33 +159,19 @@ fn get_autotile_index(edges: u8, quadrant: i8) -> i8 {
     }
 }
 
-fn read_string(path: &str) -> String {
-    use std::io::Read;
-    use std::fs::File;
-
-    let mut f = File::open(path).unwrap();
-    let mut s = String::new();
-    f.read_to_string(&mut s).unwrap();
-    s
-}
-
 impl Tilemap {
     pub fn new<F: Facade>(display: &F, map: &Board, image_filename: &str) -> Self {
         let tile_manager = TileManagerBuilder::new()
-            .add_tile(image_filename, 0, AtlasTile { offset: (12, 0), is_autotile: true } )
+            .add_tile(image_filename, 0, AtlasTile { offset: (6, 0), is_autotile: true } )
+            .add_tile("./data/map2.png", 1, AtlasTile { offset: (0, 0), is_autotile: true } )
             .build(display);
 
         let vertices = glium::VertexBuffer::immutable(display, &QUAD).unwrap();
         let indices = glium::IndexBuffer::immutable(display, PrimitiveType::TrianglesList, &QUAD_INDICES).unwrap();
 
-        let vertex_shader = read_string("./data/tile.vert");
-        let fragment_shader = read_string("./data/tile.frag");
+        let vertex_shader = util::read_string("./data/tile.vert");
+        let fragment_shader = util::read_string("./data/tile.frag");
         let program = glium::Program::from_source(display, &vertex_shader, &fragment_shader, None).unwrap();
-
-        let cols: u32 = 2048 / (48 / 2);
-        let rows: u32 = 2048 / (48 / 2);
-
-        let tex_ratio = [1.0 / cols as f32, 1.0 / rows as f32];
 
         let map = make_map(map);
 
@@ -195,7 +181,6 @@ impl Tilemap {
             vertices: vertices,
             program: program,
             tile_manager: tile_manager,
-            tex_ratio: tex_ratio,
         }
     }
 
@@ -233,7 +218,8 @@ impl<'a> ::Renderable for Tilemap {
         where F: glium::backend::Facade, S: glium::Surface {
 
         let (w, h) = (viewport.size.0 as f32, viewport.size.1 as f32);
-        let proj: [[f32; 4]; 4] = cgmath::ortho(0.0, w, h, 0.0, -1.0, 1.0).into();
+        let (x, y) = (viewport.camera.0 as f32, viewport.camera.1 as f32);
+        let proj: [[f32; 4]; 4] = cgmath::ortho(x, w + x, h + y, y, -1.0, 1.0).into();
 
         for pass in 0..self.tile_manager.passes() {
             let texture = self.tile_manager.get_texture(pass);
@@ -253,11 +239,11 @@ impl<'a> ::Renderable for Tilemap {
 
             // TODO move to arguments?
             let params = glium::DrawParameters {
-                viewport: {
-                    let (x, y) = viewport.position;
-                    let (w, h) = viewport.size;
-                    Some(glium::Rect { left: x, bottom: y, width: w, height: h })
-                },
+                // viewport: {
+                //     let (x, y) = viewport.position;
+                //     let (w, h) = viewport.size;
+                //     Some(glium::Rect { left: x, bottom: y, width: w, height: h })
+                // },
                 .. Default::default()
             };
 
