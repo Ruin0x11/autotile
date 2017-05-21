@@ -1,0 +1,10 @@
+[package]
+name = "autotile-rs"
+version = "0.1.0"
+authors = ["ruin <ipickering2@gmail.com>"]
+
+[dependencies]
+glium = "0.16.0"
+image = "0.13.0"
+cgmath = "0.14.1"
+rand = "0.3.15"
