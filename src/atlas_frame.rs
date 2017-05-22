@@ -191,7 +191,7 @@ impl TileManager {
                 TileKind::Animated(frame_count, delay) => {
                     let current_frame = msecs / delay;
                     let x_index_offset = if tile.is_autotile {
-                        (4 * current_frame) % frame_count
+                        (current_frame % frame_count) * 2
                     } else {
                         current_frame % frame_count
                     };
@@ -214,14 +214,6 @@ impl TileManager {
 
     pub fn passes(&self) -> usize {
         self.textures.len()
-    }
-}
-
-fn get_anim_offset(anim_frame: u32, is_autotile: bool) -> (u32, u32) {
-    if is_autotile {
-        (5 * anim_frame, 0)
-    } else {
-        (anim_frame, 0)
     }
 }
 

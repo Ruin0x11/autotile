@@ -168,9 +168,9 @@ impl Tilemap {
                 tile_kind: TileKind::Static,
             })
             .add_tile("./data/map2.png", 1, AtlasTile {
-                offset: (0, 6),
+                offset: (0, 0),
                 is_autotile: true,
-                tile_kind: TileKind::Animated(3, 100),
+                tile_kind: TileKind::Animated(3, 400),
             })
             .build(display);
 
