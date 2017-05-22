@@ -8,7 +8,6 @@ mod background;
 mod board;
 mod point;
 mod terrain;
-mod texture_atlas;
 mod atlas_frame;
 mod tilemap;
 mod util;
@@ -37,7 +36,7 @@ pub struct Viewport {
 }
 
 pub trait Renderable {
-    fn render<F, S>(&self, display: &F, target: &mut S, viewport: &Viewport)
+    fn render<F, S>(&self, display: &F, target: &mut S, viewport: &Viewport, msecs: u64)
         where F: glium::backend::Facade, S: glium::Surface;
 }
 
@@ -80,7 +79,7 @@ fn main() {
         let millis = get_duration_millis(duration);
         background::render_background(&display, &mut target, &viewport, millis);
 
-        tile.render(&display, &mut target, &viewport);
+        tile.render(&display, &mut target, &viewport, millis);
         target.finish().unwrap();
 
         // polling and handling the events received by the window
@@ -146,10 +145,9 @@ pub fn start_loop<F>(mut callback: F) where F: FnMut(&Duration) -> Action {
 
         let millis = get_duration_millis(&Instant::now().duration_since(start));
 
-        if millis - last_time >= 1000 { // If last prinf() was more than 1 sec ago
-            // printf and reset timer
-            let ms_per_frame = 1000/frame_count;
-            println!("{} ms/frame | {} fps", ms_per_frame, 1000 / ms_per_frame);
+        if millis - last_time >= 1000 {
+            let ms_per_frame = 1000.0 / frame_count as f32;
+            println!("{} ms/frame | {} fps", ms_per_frame, 1000.0 / ms_per_frame);
             frame_count = 0;
             last_time += 1000;
         }

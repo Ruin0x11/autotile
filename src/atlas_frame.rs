@@ -16,10 +16,19 @@ type TileIndex = usize;
 
 pub type Texture2d = glium::texture::CompressedSrgbTexture2d;
 
+type AnimFrames = u64;
+type AnimMillisDelay = u64;
+#[derive(Clone)]
+pub enum TileKind {
+    Static,
+    Animated(AnimFrames, AnimMillisDelay),
+}
+
 #[derive(Clone)]
 pub struct AtlasTile {
     pub offset: TileOffset,
     pub is_autotile: bool,
+    pub tile_kind: TileKind,
 }
 
 #[derive(Clone)]
@@ -169,12 +178,26 @@ impl TileManager {
         [1.0 / cols as f32, 1.0 / rows as f32]
     }
 
-    pub fn get_texture_offset(&self, tile_type: TileIndex) -> (f32, f32) {
+    pub fn get_texture_offset(&self, tile_type: TileIndex, msecs: u64) -> (f32, f32) {
         let frame = self.get_frame(tile_type);
+        let tile = frame.offsets.get(&tile_type).unwrap();
 
         let get_tex_coords = |index: (u32, u32)| {
             let tex_ratio = self.get_tex_ratio(frame.texture_idx);
-            let add_offset = get_add_offset(&frame.rect);
+            let mut add_offset = get_add_offset(&frame.rect);
+
+            match tile.tile_kind {
+                TileKind::Static => (),
+                TileKind::Animated(frame_count, delay) => {
+                    let current_frame = msecs / delay;
+                    let x_index_offset = if tile.is_autotile {
+                        (4 * current_frame) % frame_count
+                    } else {
+                        current_frame % frame_count
+                    };
+                    add_offset.0 += x_index_offset as u32;
+                }
+            }
 
             let tx = ((index.0 + add_offset.0) * 2) as f32 * tex_ratio[0];
             let ty = ((index.1 + add_offset.1) * 2) as f32 * tex_ratio[1];
@@ -182,8 +205,7 @@ impl TileManager {
             (tx, ty)
         };
 
-        let offset = frame.offsets.get(&tile_type).unwrap().offset;
-        get_tex_coords(offset)
+        get_tex_coords(tile.offset)
     }
 
     pub fn get_texture(&self, idx: usize) -> &Texture2d {
@@ -192,6 +214,14 @@ impl TileManager {
 
     pub fn passes(&self) -> usize {
         self.textures.len()
+    }
+}
+
+fn get_anim_offset(anim_frame: u32, is_autotile: bool) -> (u32, u32) {
+    if is_autotile {
+        (5 * anim_frame, 0)
+    } else {
+        (anim_frame, 0)
     }
 }
 

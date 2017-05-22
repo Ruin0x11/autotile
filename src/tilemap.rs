@@ -162,8 +162,16 @@ fn get_autotile_index(edges: u8, quadrant: i8) -> i8 {
 impl Tilemap {
     pub fn new<F: Facade>(display: &F, map: &Board, image_filename: &str) -> Self {
         let tile_manager = TileManagerBuilder::new()
-            .add_tile(image_filename, 0, AtlasTile { offset: (6, 0), is_autotile: true } )
-            .add_tile("./data/map2.png", 1, AtlasTile { offset: (0, 0), is_autotile: true } )
+            .add_tile(image_filename, 0, AtlasTile {
+                offset: (6, 0),
+                is_autotile: true,
+                tile_kind: TileKind::Static,
+            })
+            .add_tile("./data/map2.png", 1, AtlasTile {
+                offset: (0, 6),
+                is_autotile: true,
+                tile_kind: TileKind::Animated(3, 100),
+            })
             .build(display);
 
         let vertices = glium::VertexBuffer::immutable(display, &QUAD).unwrap();
@@ -184,7 +192,7 @@ impl Tilemap {
         }
     }
 
-    fn create_instances<F>(&self, display: &F, pass: usize) -> glium::VertexBuffer<Instance>
+    fn create_instances<F>(&self, display: &F, pass: usize, msecs: u64) -> glium::VertexBuffer<Instance>
         where F: glium::backend::Facade {
 
         let data = self.map.iter()
@@ -197,7 +205,8 @@ impl Tilemap {
                 for quadrant in 0..4 {
                     let (x, y) = (c.x, c.y);
 
-                    let (tx, ty) = self.tile_manager.get_texture_offset(tile.tile_idx);
+                    let (tx, ty) = self.tile_manager.get_texture_offset(tile.tile_idx, msecs);
+
                     let autotile_index = get_autotile_index(tile.edges, quadrant);
 
                     res.push(Instance { map_coord: [x as u32, y as u32],
@@ -214,7 +223,7 @@ impl Tilemap {
 }
 
 impl<'a> ::Renderable for Tilemap {
-    fn render<F, S>(&self, display: &F, target: &mut S, viewport: &::Viewport)
+    fn render<F, S>(&self, display: &F, target: &mut S, viewport: &::Viewport, msecs: u64)
         where F: glium::backend::Facade, S: glium::Surface {
 
         let (w, h) = (viewport.size.0 as f32, viewport.size.1 as f32);
@@ -235,7 +244,7 @@ impl<'a> ::Renderable for Tilemap {
                 tex_ratio: tex_ratio,
             };
 
-            let instances = self.create_instances(display, pass);
+            let instances = self.create_instances(display, pass, msecs);
 
             // TODO move to arguments?
             let params = glium::DrawParameters {
