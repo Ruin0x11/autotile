@@ -3,11 +3,11 @@ use glium::backend::Facade;
 use glium::index::PrimitiveType;
 use cgmath;
 
+use atlas_frame::*;
 use board::Board;
 use point::Direction;
 use point::Point;
 use point;
-use atlas_frame::*;
 use util;
 
 #[derive(Copy, Clone)]
@@ -38,11 +38,11 @@ pub const QUAD: [Vertex; 4] = [
 ];
 
 struct DrawTile {
-    tile_idx: usize,
+    idx: usize,
     edges: u8,
 }
 
-pub struct Tilemap {
+pub struct TileMap {
     map: Vec<(DrawTile, Point)>,
 
     indices: glium::IndexBuffer<u16>,
@@ -58,7 +58,7 @@ fn make_map(map: &Board) -> Vec<(DrawTile, Point)> {
         for j in 0..(map.height()) {
             let pos = Point::new(i, j);
             let tile = DrawTile {
-                tile_idx: map.get(&pos).n(),
+                idx: map.get(&pos).n(),
                 edges: get_neighboring_edges(map, pos),
             };
             res.push((tile, pos));
@@ -126,7 +126,7 @@ fn get_autotile_index(edges: u8, quadrant: i8) -> i8 {
     }
 
     // The tiles are in order from the corner inside.
-    let lookup_tile_idx = |horiz: Direction, vert: Direction, corner: Direction, tiles: [i8; 4], corner_piece: i8| {
+    let lookup_idx = |horiz: Direction, vert: Direction, corner: Direction, tiles: [i8; 4], corner_piece: i8| {
         if !is_connected(horiz) && !is_connected(vert) {
             tiles[0]
         } else if !is_connected(horiz) && is_connected(vert) {
@@ -144,29 +144,32 @@ fn get_autotile_index(edges: u8, quadrant: i8) -> i8 {
 
     match quadrant {
         QUAD_NW => {
-            lookup_tile_idx(N, W, NW, [8, 9, 12, 13], 2)
+            lookup_idx(N, W, NW, [8, 9, 12, 13], 2)
         },
         QUAD_NE => {
-            lookup_tile_idx(N, E, NE, [11, 10, 15, 14], 3)
+            lookup_idx(N, E, NE, [11, 10, 15, 14], 3)
         },
         QUAD_SW => {
-            lookup_tile_idx(S, W, SW, [20, 21, 16, 17], 6)
+            lookup_idx(S, W, SW, [20, 21, 16, 17], 6)
         },
         QUAD_SE => {
-            lookup_tile_idx(S, E, SE, [23, 22, 19, 18], 7)
+            lookup_idx(S, E, SE, [23, 22, 19, 18], 7)
         },
         _ => -1,
     }
 }
 
-impl Tilemap {
+impl TileMap {
     pub fn new<F: Facade>(display: &F, map: &Board, image_filename: &str) -> Self {
-        let tile_manager = TileManagerBuilder::new()
-            .add_tile(image_filename, 0, AtlasTile {
-                offset: (6, 0),
-                is_autotile: true,
-                tile_kind: TileKind::Static,
-            })
+        let mut builder = TileManagerBuilder::new();
+        builder.add_frame(image_filename, (48, 48));
+        builder.add_frame("./data/map2.png", (48, 48));
+
+        let tile_manager = builder.add_tile(image_filename, 0, AtlasTile {
+            offset: (6, 0),
+            is_autotile: true,
+            tile_kind: TileKind::Static,
+        })
             .add_tile("./data/map2.png", 1, AtlasTile {
                 offset: (0, 0),
                 is_autotile: true,
@@ -183,7 +186,7 @@ impl Tilemap {
 
         let map = make_map(map);
 
-        Tilemap {
+        TileMap {
             map: map,
             indices: indices,
             vertices: vertices,
@@ -197,15 +200,14 @@ impl Tilemap {
 
         let data = self.map.iter()
             .filter(|&&(ref tile, _)| {
-                let texture_idx = self.tile_manager.get_tile_texture_idx(tile.tile_idx);
+                let texture_idx = self.tile_manager.get_tile_texture_idx(tile.idx);
                 texture_idx == pass
             })
             .flat_map(|&(ref tile, c)| {
                 let mut res = Vec::new();
                 for quadrant in 0..4 {
                     let (x, y) = (c.x, c.y);
-
-                    let (tx, ty) = self.tile_manager.get_texture_offset(tile.tile_idx, msecs);
+                    let (tx, ty) = self.tile_manager.get_texture_offset(tile.idx, msecs);
 
                     let autotile_index = get_autotile_index(tile.edges, quadrant);
 
@@ -222,7 +224,7 @@ impl Tilemap {
     }
 }
 
-impl<'a> ::Renderable for Tilemap {
+impl<'a> ::Renderable for TileMap {
     fn render<F, S>(&self, display: &F, target: &mut S, viewport: &::Viewport, msecs: u64)
         where F: glium::backend::Facade, S: glium::Surface {
 
@@ -232,7 +234,7 @@ impl<'a> ::Renderable for Tilemap {
 
         for pass in 0..self.tile_manager.passes() {
             let texture = self.tile_manager.get_texture(pass);
-            let tex_ratio = self.tile_manager.get_tex_ratio(pass);
+            let tex_ratio = self.tile_manager.get_tilemap_tex_ratio(pass);
 
             let uniforms = uniform! {
                 matrix: proj,
@@ -248,6 +250,7 @@ impl<'a> ::Renderable for Tilemap {
 
             // TODO move to arguments?
             let params = glium::DrawParameters {
+                blend: glium::Blend::alpha_blending(),
                 // viewport: {
                 //     let (x, y) = viewport.position;
                 //     let (w, h) = viewport.size;

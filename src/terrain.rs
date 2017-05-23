@@ -27,8 +27,8 @@ impl Terrain {
 
     pub fn n(&self) -> usize {
         match *self {
-            Terrain::Wall => 1,
-            Terrain::Floor => 0,
+            Terrain::Wall => 0,
+            Terrain::Floor => 1,
             Terrain::Important => 0,
             Terrain::Nothing => 0,
         }

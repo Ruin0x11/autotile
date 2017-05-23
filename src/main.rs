@@ -4,11 +4,12 @@ extern crate image;
 extern crate rand;
 extern crate texture_packer;
 
+mod atlas_frame;
 mod background;
 mod board;
 mod point;
 mod terrain;
-mod atlas_frame;
+mod spritemap;
 mod tilemap;
 mod util;
 
@@ -23,7 +24,8 @@ use point::{Point, RectangleIter};
 
 use board::Board;
 use terrain::Terrain;
-use tilemap::Tilemap;
+use spritemap::SpriteMap;
+use tilemap::TileMap;
 
 const SCREEN_WIDTH: u32 = 800;
 const SCREEN_HEIGHT: u32 = 600;
@@ -63,12 +65,13 @@ fn main() {
     }
 
     board.set(&Point::new(6, 6), Terrain::Wall);
-    board.set(&Point::new(5, 6), Terrain::Wall);
-    board.set(&Point::new(7, 6), Terrain::Wall);
-    board.set(&Point::new(6, 5), Terrain::Wall);
-    board.set(&Point::new(6, 7), Terrain::Wall);
+    // board.set(&Point::new(5, 6), Terrain::Wall);
+    // board.set(&Point::new(7, 6), Terrain::Wall);
+    // board.set(&Point::new(6, 5), Terrain::Wall);
+    // board.set(&Point::new(6, 7), Terrain::Wall);
 
-    let tile = Tilemap::new(&display, &board, "./data/map.png");
+    let tile = TileMap::new(&display, &board, "./data/map.png");
+    let sprite = SpriteMap::new(&display);
 
     let mut viewport = Viewport { position: (0, 0), size: (SCREEN_WIDTH, SCREEN_HEIGHT), camera: (0, 0) };
 
@@ -80,6 +83,9 @@ fn main() {
         background::render_background(&display, &mut target, &viewport, millis);
 
         tile.render(&display, &mut target, &viewport, millis);
+
+        sprite.render(&display, &mut target, &viewport, millis);
+
         target.finish().unwrap();
 
         // polling and handling the events received by the window

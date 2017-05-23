@@ -40,9 +40,9 @@ pub struct AtlasFrame {
 }
 
 impl AtlasFrame {
-    pub fn new(texture_idx: usize, rect: Rect) -> Self {
+    pub fn new(texture_idx: usize, rect: Rect, tile_size: (u32, u32)) -> Self {
         AtlasFrame {
-            tile_size: (48, 48),
+            tile_size: tile_size,
             texture_idx: texture_idx,
             rect: rect,
             offsets: HashMap::new(),
@@ -77,12 +77,11 @@ impl <'a> TileManagerBuilder<'a> {
 
     pub fn add_tile(&'a mut self, path_str: &str, index: TileIndex, tile_data: AtlasTile) -> &'a mut Self {
         let key = path_str.to_string();
-        if !self.frames.contains_key(&key) {
-            self.add_image(key.clone());
-        }
+        assert!(self.frames.contains_key(&path_str.to_string()));
 
         {
             let mut frame = self.frames.get_mut(&key).unwrap();
+            assert!(!frame.offsets.contains_key(&index));
             frame.offsets.insert(index, tile_data);
             self.locations.insert(index, key);
         }
@@ -90,15 +89,17 @@ impl <'a> TileManagerBuilder<'a> {
         self
     }
 
-    fn add_image(&mut self, path_string: String) {
+    pub fn add_frame(&mut self, path_string: &str, tile_size: (u32, u32)) {
         let path = Path::new(&path_string);
         let texture = ImageImporter::import_from_file(&path).unwrap();
 
         for (idx, packer) in self.packers.iter_mut().enumerate() {
             if packer.can_pack(&texture) {
-                packer.pack_own(path_string.clone(), texture).unwrap();
+                packer.pack_own(path_string.to_string(), texture).unwrap();
                 let rect = packer.get_frame(&path_string).unwrap().frame.clone();
-                self.frames.insert(path_string.clone(), AtlasFrame::new(idx, rect));
+                self.frames.insert(path_string.to_string(), AtlasFrame::new(idx, rect, tile_size));
+                // cannot return self here, since self already borrowed, so
+                // cannot use builder pattern.
                 return;
             }
         }
@@ -111,9 +112,9 @@ impl <'a> TileManagerBuilder<'a> {
 
             let packer_idx = self.packers.len() - 1;
             let mut packer = self.packers.get_mut(packer_idx).unwrap();
-            packer.pack_own(path_string.clone(), texture).unwrap();
+            packer.pack_own(path_string.to_string(), texture).unwrap();
             let rect = packer.get_frame(&path_string).unwrap().frame.clone();
-            self.frames.insert(path_string.clone(), AtlasFrame::new(packer_idx, rect));
+            self.frames.insert(path_string.to_string(), AtlasFrame::new(packer_idx, rect, tile_size));
         }
     }
 
@@ -161,16 +162,12 @@ impl TileManager {
         self.frames.get(tex_name).unwrap()
     }
 
-    pub fn get(&self, tile_type: TileIndex) -> &AtlasTile {
-        let frame = self.get_frame(tile_type);
-        frame.offsets.get(&tile_type).unwrap()
-    }
-
     pub fn get_tile_texture_idx(&self, tile_type: TileIndex) -> usize {
         self.get_frame(tile_type).texture_idx
     }
 
-    pub fn get_tex_ratio(&self, texture_idx: usize) -> [f32; 2] {
+
+    pub fn get_tilemap_tex_ratio(&self, texture_idx: usize) -> [f32; 2] {
         let dimensions = self.textures.get(texture_idx).unwrap().dimensions();
 
         let cols: u32 = dimensions.0 / 24;
@@ -178,13 +175,36 @@ impl TileManager {
         [1.0 / cols as f32, 1.0 / rows as f32]
     }
 
+    pub fn get_sprite_tex_ratio(&self, tile_type: TileIndex) -> [f32; 2] {
+        let frame = self.get_frame(tile_type);
+        let (mut sx, mut sy) = frame.tile_size;
+
+        if frame.offsets.get(&tile_type).unwrap().is_autotile {
+            // divide the autotile into 24x24 from 48x48
+            sx /= 2;
+            sy /= 2;
+        }
+
+        let texture_idx = self.get_frame(tile_type).texture_idx;
+        let mut dimensions = self.textures.get(texture_idx).unwrap().dimensions();
+
+        let cols: f32 = dimensions.0 as f32 / sx as f32;
+        let rows: f32 = dimensions.1 as f32 / sy as f32;
+        [1.0 / cols, 1.0 / rows]
+    }
+
+    pub fn get_tile_texture_size(&self, tile_type: TileIndex) -> (u32, u32) {
+        self.get_frame(tile_type).tile_size
+    }
+
     pub fn get_texture_offset(&self, tile_type: TileIndex, msecs: u64) -> (f32, f32) {
         let frame = self.get_frame(tile_type);
         let tile = frame.offsets.get(&tile_type).unwrap();
 
         let get_tex_coords = |index: (u32, u32)| {
-            let tex_ratio = self.get_tex_ratio(frame.texture_idx);
-            let mut add_offset = get_add_offset(&frame.rect);
+            let tex_ratio = self.get_sprite_tex_ratio(tile_type);
+            let mut add_offset = get_add_offset(&frame.rect, &frame.tile_size);
+            println!("rat: {:?} add: {:?} size: {:?}", tex_ratio, add_offset, frame.tile_size);
 
             match tile.tile_kind {
                 TileKind::Static => (),
@@ -199,8 +219,26 @@ impl TileManager {
                 }
             }
 
-            let tx = ((index.0 + add_offset.0) * 2) as f32 * tex_ratio[0];
-            let ty = ((index.1 + add_offset.1) * 2) as f32 * tex_ratio[1];
+            let mut ratio = 1;
+
+
+            if !tile.is_autotile {
+                let current_frame = msecs / 200;
+                let x_index_offset = if tile.is_autotile {
+                    (current_frame % 12) * 2
+                } else {
+                    current_frame % 12
+                };
+
+                add_offset.0 += x_index_offset as u32;
+            }
+
+            if tile.is_autotile {
+                ratio = 2;
+            }
+
+            let tx = ((index.0 + add_offset.0) * ratio) as f32 * tex_ratio[0];
+            let ty = ((index.1 + add_offset.1) * ratio) as f32 * tex_ratio[1];
 
             (tx, ty)
         };
@@ -217,8 +255,8 @@ impl TileManager {
     }
 }
 
-fn get_add_offset(rect: &Rect) -> (u32, u32) {
-    let cols: u32 = rect.x / 48;
-    let rows: u32 = rect.y / 48;
+fn get_add_offset(rect: &Rect, tile_size: &(u32, u32)) -> (u32, u32) {
+    let cols: u32 = rect.x / tile_size.0;
+    let rows: u32 = rect.y / tile_size.1;
     (cols, rows)
 }
