@@ -11,6 +11,8 @@ use texture_packer::{TexturePacker, TexturePackerConfig};
 use texture_packer::importer::ImageImporter;
 use texture_packer::exporter::ImageExporter;
 
+use util;
+
 type TileOffset = (u32, u32);
 type TileIndex = usize;
 
@@ -139,7 +141,7 @@ impl <'a> TileManagerBuilder<'a> {
             let image = ImageExporter::export(packer).unwrap();
             let mut file = File::create("data/pack.png").unwrap();
             image.save(&mut file, image::PNG).unwrap();
-            textures.push(make_texture(display, image));
+            textures.push(util::make_texture(display, image));
         }
 
         TileManager {
@@ -148,12 +150,6 @@ impl <'a> TileManagerBuilder<'a> {
             textures: textures,
         }
     }
-}
-
-fn make_texture<F: Facade>(display: &F, image: DynamicImage) -> Texture2d {
-    let dimensions = image.dimensions();
-    let image = glium::texture::RawImage2d::from_raw_rgba_reversed(image.to_rgba().into_raw(), dimensions);
-    Texture2d::new(display, image).unwrap()
 }
 
 impl TileManager {

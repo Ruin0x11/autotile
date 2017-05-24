@@ -1,5 +1,6 @@
 extern crate cgmath;
 #[macro_use] extern crate glium;
+extern crate glium_text;
 extern crate image;
 extern crate rand;
 extern crate texture_packer;
@@ -11,7 +12,9 @@ mod point;
 mod terrain;
 mod spritemap;
 mod tilemap;
+mod ui;
 mod util;
+mod texture_atlas;
 
 use std::thread;
 use std::time::{Duration, Instant};
@@ -26,6 +29,7 @@ use board::Board;
 use terrain::Terrain;
 use spritemap::SpriteMap;
 use tilemap::TileMap;
+use ui::*;
 
 const SCREEN_WIDTH: u32 = 800;
 const SCREEN_HEIGHT: u32 = 600;
@@ -70,8 +74,9 @@ fn main() {
     // board.set(&Point::new(6, 5), Terrain::Wall);
     // board.set(&Point::new(6, 7), Terrain::Wall);
 
-    let tile = TileMap::new(&display, &board, "./data/map.png");
-    let sprite = SpriteMap::new(&display);
+    // let tile = TileMap::new(&display, &board, "./data/map.png");
+    // let sprite = SpriteMap::new(&display);
+    let mut ui = UiRenderer::new(&display);
 
     let mut viewport = Viewport { position: (0, 0), size: (SCREEN_WIDTH, SCREEN_HEIGHT), camera: (0, 0) };
 
@@ -82,9 +87,17 @@ fn main() {
         let millis = get_duration_millis(duration);
         background::render_background(&display, &mut target, &viewport, millis);
 
-        tile.render(&display, &mut target, &viewport, millis);
+        // tile.render(&display, &mut target, &viewport, millis);
 
-        sprite.render(&display, &mut target, &viewport, millis);
+        // sprite.render(&display, &mut target, &viewport, millis);
+
+        ui.clear();
+        for i in 0..6 {
+            let win = UiWindow::new((i * 64, 0), &display);
+            win.draw(&mut ui);
+        }
+
+        ui.render(&display, &mut target, &viewport, millis);
 
         target.finish().unwrap();
 
