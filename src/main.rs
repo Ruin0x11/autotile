@@ -27,9 +27,9 @@ use point::{Point, RectangleIter};
 
 use board::Board;
 use terrain::Terrain;
+use ui::*;
 use spritemap::SpriteMap;
 use tilemap::TileMap;
-use ui::*;
 
 const SCREEN_WIDTH: u32 = 800;
 const SCREEN_HEIGHT: u32 = 600;
@@ -38,6 +38,7 @@ const SCREEN_HEIGHT: u32 = 600;
 pub struct Viewport {
     position: (u32, u32),
     size: (u32, u32),
+    scale: f32,
     camera: (i32, i32),
 }
 
@@ -77,8 +78,16 @@ fn main() {
     // let tile = TileMap::new(&display, &board, "./data/map.png");
     // let sprite = SpriteMap::new(&display);
     let mut ui = UiRenderer::new(&display);
+    let win = UiWindow::new((0, 0));
+    win.draw(&mut ui);
+    let scale = display.get_window().unwrap().hidpi_factor();
 
-    let mut viewport = Viewport { position: (0, 0), size: (SCREEN_WIDTH, SCREEN_HEIGHT), camera: (0, 0) };
+    let mut viewport = Viewport {
+        position: (0, 0),
+        size: (SCREEN_WIDTH, SCREEN_HEIGHT),
+        scale: scale,
+        camera: (0, 0)
+    };
 
     start_loop(|duration| {
         let mut target = display.draw();
@@ -91,12 +100,6 @@ fn main() {
 
         // sprite.render(&display, &mut target, &viewport, millis);
 
-        ui.clear();
-        for i in 0..6 {
-            let win = UiWindow::new((i * 64, 0), &display);
-            win.draw(&mut ui);
-        }
-
         ui.render(&display, &mut target, &viewport, millis);
 
         target.finish().unwrap();
@@ -106,11 +109,20 @@ fn main() {
             match event {
                 glutin::Event::Closed => return Action::Stop,
                 glutin::Event::Resized(w, h) => {
-                    viewport = Viewport { position: (0, 0), size: (w, h), camera: (0, 0) };
+                    viewport = Viewport {
+                        position: (0, 0),
+                        size: (w, h),
+                        scale: viewport.scale,
+                        camera: viewport.camera,
+                    };
                 },
                 glutin::Event::KeyboardInput(ElementState::Pressed, _, Some(code)) => {
                     println!("Key: {:?}", code);
                     match code {
+                        VirtualKeyCode::Escape |
+                        VirtualKeyCode::Q => {
+                            return Action::Stop;
+                        },
                         VirtualKeyCode::Left => {
                             viewport.camera.0 -= 48;
                         },

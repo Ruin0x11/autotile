@@ -200,7 +200,6 @@ impl TileManager {
         let get_tex_coords = |index: (u32, u32)| {
             let tex_ratio = self.get_sprite_tex_ratio(tile_type);
             let mut add_offset = get_add_offset(&frame.rect, &frame.tile_size);
-            println!("rat: {:?} add: {:?} size: {:?}", tex_ratio, add_offset, frame.tile_size);
 
             match tile.tile_kind {
                 TileKind::Static => (),
