@@ -5,13 +5,14 @@ use cgmath;
 use glium;
 use glium::backend::Facade;
 use glium::index::PrimitiveType;
-use glium_text::FontTexture;
 use glium::Rect;
 use texture_packer;
 
+use font::FontTexture;
 use texture_atlas::*;
 use util;
 
+#[derive(Clone, Copy, Debug)]
 struct AreaRect {
     x1: f32,
     y1: f32,
@@ -48,7 +49,7 @@ impl UiDrawList {
 
         let should_merge = {
             let last = self.commands.get(self.commands.len() - 1).unwrap();
-            last.is_font == cmd.is_font && last.clip_rect == cmd.clip_rect
+            last.is_text == cmd.is_text && last.clip_rect == cmd.clip_rect
         };
 
         if should_merge {
@@ -64,8 +65,8 @@ impl UiDrawList {
 #[derive(Clone, Copy)]
 struct UiDrawCmd {
     elem_count: usize,
-    is_font: bool,
-    clip_rect: (f32, f32, f32, f32),
+    is_text: bool,
+    clip_rect: Option<(f32, f32, f32, f32)>,
 }
 
 #[derive(Clone, Copy)]
@@ -105,8 +106,8 @@ pub struct UiRenderer {
     ui_atlas: TextureAtlas,
     font: FontTexture,
     draw_list: UiDrawList,
-    last_index: u16,
     program: glium::Program,
+    font_program: glium::Program,
 }
 
 pub enum TexDir {
@@ -115,11 +116,17 @@ pub enum TexDir {
     Area,
 }
 
+pub enum TexKind {
+    Elem(&'static str, (u32, u32), (u32, u32)),
+    Font(AreaRect, (u32, u32)),
+}
+
 impl UiRenderer {
     pub fn new<F: Facade>(display: &F) -> Self {
         let font = FontTexture::new(display,
                                     File::open(&Path::new("./data/gohufont-14.ttf")).unwrap(),
                                     24).unwrap();
+
         let atlas = TextureAtlasBuilder::new()
             .add_texture("win")
             .build(display);
@@ -128,21 +135,23 @@ impl UiRenderer {
         let fragment_shader = util::read_string("./data/identity.frag");
         let program = glium::Program::from_source(display, &vertex_shader, &fragment_shader, None).unwrap();
 
+        let font_fragment_shader = util::read_string("./data/font.frag");
+        let font_program = glium::Program::from_source(display, &vertex_shader, &font_fragment_shader, None).unwrap();
+
         UiRenderer {
             ui_atlas: atlas,
             font: font,
             draw_list: UiDrawList::new(),
-            last_index: 0,
             program: program,
+            font_program: font_program,
         }
     }
 
     pub fn clear(&mut self) {
         self.draw_list.clear();
-        self.last_index = 0;
     }
 
-    pub fn repeat_tex(&mut self, key: &str,
+    pub fn repeat_tex(&mut self, key: &'static str,
                       dir: TexDir,
                       clipping_rect: (u32, u32, u32, u32),
                       tex_pos: (u32, u32),
@@ -157,10 +166,10 @@ impl UiRenderer {
         match dir {
             TexDir::Horizontal => {
                 repeats_h = clipping_width / tw;
-                repeats_v = 1;
+                repeats_v = 0;
             },
             TexDir::Vertical => {
-                repeats_h = 1;
+                repeats_h = 0;
                 repeats_v = clipping_height / th;
             },
             TexDir::Area => {
@@ -172,11 +181,14 @@ impl UiRenderer {
         let mut x = cxa;
         let mut y = cya;
 
-        for _ in 0..repeats_h {
-            for _ in 0..repeats_v {
-                let screen_pos = (x, y);
+        for _ in 0..(repeats_h + 1) {
+            for _ in 0..(repeats_v + 1) {
+                let screen_pos = (x as i32, y as i32);
 
-                self.add_tex_internal(key, screen_pos, tex_pos, tex_area, clipping_rect);
+                self.add_tex_internal(TexKind::Elem(key, tex_pos, tex_area),
+                                      screen_pos,
+                                      Some(clipping_rect),
+                                      (255, 255, 255, 255));
 
                 y += th;
             }
@@ -185,26 +197,44 @@ impl UiRenderer {
         }
     }
 
-    fn add_tex_internal(&mut self, key: &str,
-                        screen_pos: (u32, u32),
-                        tex_pos: (u32, u32),
-                        tex_area: (u32, u32),
-                        clip_rect: (u32, u32, u32, u32)) {
-        let area = self.ui_atlas.get_texture_area(key);
-        let tex_subarea = (tex_pos.0, tex_pos.1, tex_pos.0 + tex_area.0, tex_pos.1 + tex_area.1);
+    fn add_tex_internal(&mut self, kind: TexKind,
+                        screen_pos: (i32, i32),
+                        clip_rect: Option<(u32, u32, u32, u32)>,
+                        color: (u8, u8, u8, u8)) {
+        let tex_coords = match kind {
+            TexKind::Elem(key, tex_pos, tex_area) => {
+                let area = self.ui_atlas.get_texture_area(key);
+                let tex_subarea = (tex_pos.0, tex_pos.1, tex_pos.0 + tex_area.0, tex_pos.1 + tex_area.1);
+                calc_tex_subarea(area, tex_subarea)
+            },
+            TexKind::Font(coords, _) => coords,
+        };
+
+        let is_text = match kind {
+            TexKind::Elem(..) => false,
+            TexKind::Font(..) => true,
+        };
+
+        let clip_rect = match clip_rect {
+            Some(r) => Some((r.0 as f32, r.1 as f32, r.2 as f32, r.3 as f32)),
+            None => None
+        };
 
         let cmd = UiDrawCmd {
             elem_count: 6,
-            is_font: false,
-            clip_rect: (clip_rect.0 as f32, clip_rect.1 as f32,
-                        clip_rect.2 as f32, clip_rect.3 as f32),
+            is_text: is_text,
+            clip_rect: clip_rect,
         };
 
-        let tex_coords = calc_tex_subarea(area, tex_subarea);
         let (sx, sy) = screen_pos;
-        let (tw, th) = tex_area;
+        let (tw, th) = match kind {
+            TexKind::Elem(_, _, tex_area) => tex_area,
+            TexKind::Font(_, char_size) => char_size,
+        };
+        let tw = tw as i32;
+        let th = th as i32;
 
-        let color = [255, 255, 255, 255];
+        let color = [color.0, color.1, color.2, color.3];
 
         let vertices = vec! [
             UiVertex { pos: [sx as f32, sy as f32],
@@ -227,8 +257,7 @@ impl UiRenderer {
 
         let next_indices = |i| vec![i, i+1, i+2, i, i+2, i+3];
 
-        let indices = next_indices(self.last_index);
-        self.last_index += 4;
+        let indices = next_indices(self.draw_list.vertices.len() as u16);
 
         self.draw_list.vertices.extend(vertices);
         self.draw_list.indices.extend(indices);
@@ -240,14 +269,66 @@ impl UiRenderer {
         self.draw_list.add_command(cmd);
     }
 
-    pub fn add_tex(&mut self, key: &str,
-                   screen_pos: (u32, u32),
+    pub fn add_tex(&mut self, key: &'static str,
+                   screen_pos: (i32, i32),
+                   clip_rect: Option<(u32, u32, u32, u32)>,
                    tex_pos: (u32, u32),
                    tex_area: (u32, u32)) {
-        let (sx, sy) = screen_pos;
-        let (tw, th) = tex_area;
-        let clip_rect = (sx, sy, sx + tw, sy + th);
-        self.add_tex_internal(key, screen_pos, tex_pos, tex_area, clip_rect);
+        self.add_tex_internal(TexKind::Elem(key, tex_pos, tex_area),
+                              screen_pos,
+                              clip_rect,
+                              (255, 255, 255, 255));
+    }
+
+    pub fn add_string(&mut self, screen_pos: (i32, i32),
+                      clipping_rect: Option<(u32, u32, u32, u32)>,
+                      color: (u8, u8, u8, u8),
+                      text: &str) {
+        if text.len() == 0 {
+            return;
+        }
+
+        let mut total_text_width = 0.0;
+        for ch in text.chars() { // FIXME: apparently wrong, but only thing stable
+            let added = self.add_char(screen_pos, clipping_rect, total_text_width, color, ch);
+            total_text_width += added;
+        }
+    }
+
+    // Returns the width of the character printed in EMs.
+    fn add_char(&mut self, screen_pos: (i32, i32),
+                clipping_rect: Option<(u32, u32, u32, u32)>,
+                total_text_width: f32,
+                color: (u8, u8, u8, u8),
+                ch: char) -> f32 {
+        let infos = match self.font.find_infos(ch) {
+            Some(infos) => infos,
+            None => return 0.0,
+        };
+
+        let area = AreaRect {
+            x1: infos.tex_coords.0,
+            y1: infos.tex_coords.1,
+            x2: infos.tex_coords.0 + infos.tex_size.0,
+            y2: infos.tex_coords.1 + infos.tex_size.1,
+        };
+
+        let pt = 14.0;
+
+        let (ch_width, ch_height) = ((infos.size.0 * pt) as u32, (infos.size.1 * pt) as u32);
+        let added_width = infos.size.0 + infos.left_padding;
+
+        // check overflow
+        if screen_pos.1 < (infos.height_over_line * pt) as i32 {
+            return added_width;
+        }
+
+        let true_pos = (screen_pos.0 + (total_text_width * pt) as i32,
+                        screen_pos.1 - (infos.height_over_line * pt) as i32);
+
+        self.add_tex_internal(TexKind::Font(area, (ch_width, ch_height)), true_pos, clipping_rect, color);
+
+        added_width
     }
 }
 
@@ -260,20 +341,12 @@ impl<'a> ::Renderable for UiRenderer {
 
         let vertices = glium::VertexBuffer::dynamic(display, &self.draw_list.vertices).unwrap();
 
-        let uniforms = uniform! {
-            matrix: proj,
-            tex: self.ui_atlas.get_texture().sampled()
-                .wrap_function(glium::uniforms::SamplerWrapFunction::Clamp)
-                .minify_filter(glium::uniforms::MinifySamplerFilter::Nearest)
-                .magnify_filter(glium::uniforms::MagnifySamplerFilter::Nearest),
-        };
-
         let height = viewport.size.1 as f32;
         let scale = viewport.scale;
 
         let mut idx_start = 0;
 
-        if msecs % 1000 == 0 {
+        if (msecs / 1000) % 2 == 0 {
             println!("Draw commands: {}", self.draw_list.commands.len());
         }
 
@@ -286,30 +359,52 @@ impl<'a> ::Renderable for UiRenderer {
                                                       .indices[idx_start..idx_end]).unwrap();
             idx_start = idx_end;
 
-            let scissor = Rect {
-                left: (cmd.clip_rect.0 * scale) as u32,
-                bottom: ((height - cmd.clip_rect.3) * scale) as u32,
-                width: ((cmd.clip_rect.2 - cmd.clip_rect.0) * scale) as u32,
-                height: ((cmd.clip_rect.3 - cmd.clip_rect.1) * scale) as u32,
+            let uniforms = if cmd.is_text {
+                uniform! {
+                    matrix: proj,
+                    tex: self.font.get_texture().sampled()
+                        .wrap_function(glium::uniforms::SamplerWrapFunction::Clamp)
+                        .minify_filter(glium::uniforms::MinifySamplerFilter::Nearest)
+                        .magnify_filter(glium::uniforms::MagnifySamplerFilter::Nearest),
+                }
+            } else {
+                uniform! {
+                    matrix: proj,
+                    tex: self.ui_atlas.get_texture().sampled()
+                        .wrap_function(glium::uniforms::SamplerWrapFunction::Clamp)
+                        .minify_filter(glium::uniforms::MinifySamplerFilter::Nearest)
+                        .magnify_filter(glium::uniforms::MagnifySamplerFilter::Nearest),
+                }
             };
 
-            let sc_now = if (msecs / 1000) % 2 == 0 {
-                None
-            } else {
-                Some(scissor)
-            };
+            let scissor = cmd.clip_rect.map(|rect| {
+                Rect {
+                    left: (rect.0 * scale) as u32,
+                    bottom: ((height - rect.3) * scale) as u32,
+                    width: ((rect.2 - rect.0) * scale) as u32,
+                    height: ((rect.3 - rect.1) * scale) as u32,
+                }
+            });
 
             let params = glium::DrawParameters {
                 blend: glium::Blend::alpha_blending(),
-                scissor: sc_now,
+                scissor: scissor,
                 .. Default::default()
             };
 
-            target.draw(&vertices,
-                        &indices,
-                        &self.program,
-                        &uniforms,
-                        &params).unwrap();
+            if cmd.is_text {
+                target.draw(&vertices,
+                            &indices,
+                            &self.font_program,
+                            &uniforms,
+                            &params).unwrap();
+            } else {
+                target.draw(&vertices,
+                            &indices,
+                            &self.program,
+                            &uniforms,
+                            &params).unwrap();
+            }
         }
     }
 }
@@ -323,7 +418,7 @@ impl UiWindow {
     pub fn new(pos: (u32, u32)) -> Self {
         UiWindow {
             pos: pos,
-            size: (1280, 768),
+            size: (300, 400),
         }
     }
 
@@ -331,19 +426,56 @@ impl UiWindow {
         let (x, y) = self.pos;
         let (w, h) = self.size;
 
+        // center
+        renderer.repeat_tex("win", TexDir::Area,
+                            (x + 32,       y + 32,
+                             x + (w - 32), y + (h - 32)),
+                            (16, 16), (32, 32));
+
         // corners
-        renderer.add_tex("win",  (x,            y),             (0,  0),  (32, 32));
-        renderer.add_tex("win",  (x,            y + (h - 32)),  (0,  32), (32, 32));
-        renderer.add_tex("win",  (x + (w - 32), y),             (32, 0),  (32, 32));
-        renderer.add_tex("win",  (x + (w - 32), y + (h - 32)),  (32, 32), (32, 32));
+        renderer.add_tex("win",  (x as i32,              y as i32),               None, (0,  0),  (32, 32));
+        renderer.add_tex("win",  (x as i32,              (y + (h - 32)) as i32),  None, (0,  32), (32, 32));
+        renderer.add_tex("win",  ((x + (w - 32)) as i32, y as i32),               None, (32, 0),  (32, 32));
+        renderer.add_tex("win",  ((x + (w - 32)) as i32, (y + (h - 32)) as i32),  None, (32, 32), (32, 32));
 
         // borders
-        renderer.repeat_tex("win", TexDir::Horizontal, (x + 32,       y,            x + (w - 32), y),            (16, 0),  (32, 32));
-        renderer.repeat_tex("win", TexDir::Horizontal, (x + 32,       y + (h - 32), x + (w - 32), y + (h - 32)), (16, 32), (32, 32));
-        renderer.repeat_tex("win", TexDir::Vertical,   (x,            y + 32, x + (w - 32), y + (h - 32)),       (0,  16), (32, 32));
-        renderer.repeat_tex("win", TexDir::Vertical,   (x + (w - 32), y + 32, x + (w - 32), y + (h - 32)),       (32, 16), (32, 32));
+        renderer.repeat_tex("win", TexDir::Horizontal, (x + 32,       y,            x + (w - 32), y + 32),            (16, 0),  (32, 32));
+        renderer.repeat_tex("win", TexDir::Horizontal, (x + 32,       y + (h - 32), x + (w - 32), y + h), (16, 32), (32, 32));
+        renderer.repeat_tex("win", TexDir::Vertical,   (x,            y + 32,       x + 32, y + (h - 32)),       (0,  16), (32, 32));
+        renderer.repeat_tex("win", TexDir::Vertical,   (x + (w - 32), y + 32,       x + w, y + (h - 32)),       (32, 16), (32, 32));
 
-        // center
-        renderer.repeat_tex("win", TexDir::Area,       (x + 32,       y + 32, x + (w - 32), y + (h - 32)),       (16, 16), (32, 32));
+        for i in 0..10 {
+            UiText::new((x as i32 + 32, y as i32 + 32 * i), "Nyanko! Nyanko! Nyanko!").draw(renderer);
+        }
+    }
+
+    fn rect(&self) -> (u32, u32, u32, u32) {
+        let conv = |i| {
+            if i < 0 {
+                0
+            } else {
+                (i + 1) as u32
+            }
+        };
+
+        (conv(self.pos.0), conv(self.pos.1), conv(self.pos.0 + self.size.0), conv(self.pos.1 + self.size.1))
+    }
+}
+
+pub struct UiText {
+    pos: (i32, i32),
+    text: String,
+}
+
+impl UiText {
+    pub fn new(pos: (i32, i32), text: &str) -> Self {
+        UiText {
+            pos: pos,
+            text: text.to_string(),
+        }
+    }
+
+    pub fn draw(&self, renderer: &mut UiRenderer) {
+        renderer.add_string(self.pos, None, (0, 0, 0, 255), &self.text);
     }
 }

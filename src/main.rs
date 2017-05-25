@@ -8,13 +8,14 @@ extern crate texture_packer;
 mod atlas_frame;
 mod background;
 mod board;
+mod font;
 mod point;
-mod terrain;
 mod spritemap;
+mod terrain;
+mod texture_atlas;
 mod tilemap;
 mod ui;
 mod util;
-mod texture_atlas;
 
 use std::thread;
 use std::time::{Duration, Instant};
