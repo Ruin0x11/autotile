@@ -1,3 +1,4 @@
+extern crate rusttype;
 extern crate cgmath;
 #[macro_use] extern crate glium;
 extern crate glium_text;
@@ -79,8 +80,8 @@ fn main() {
     // let tile = TileMap::new(&display, &board, "./data/map.png");
     // let sprite = SpriteMap::new(&display);
     let mut ui = UiRenderer::new(&display);
-    let win = UiWindow::new((0, 0));
-    win.draw(&mut ui);
+    let list = UiList::new((0, 0), vec!["Dood", "Hello, my dear", "end of days"]);
+    list.draw(&mut ui);
     let scale = display.get_window().unwrap().hidpi_factor();
 
     let mut viewport = Viewport {

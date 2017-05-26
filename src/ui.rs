@@ -127,7 +127,8 @@ impl UiRenderer {
 
         let font = FontTexture::new(display,
                                     File::open(&Path::new("./data/gohufont-14.ttf")).unwrap(),
-                                    font_size).unwrap();
+                                    font_size,
+                                    FontTexture::ascii_character_list()).unwrap();
 
                let atlas = TextureAtlasBuilder::new()
             .add_texture("win")
@@ -318,19 +319,18 @@ impl UiRenderer {
         let pt = self.font.get_font_size() as f32;
 
         let (ch_width, ch_height) = ((infos.size.0 * pt) as u32, (infos.size.1 * pt) as u32);
-        let added_width = infos.size.0 + infos.left_padding;
 
         // check overflow
-        if screen_pos.1 < (infos.height_over_line * pt) as i32 {
-            return added_width;
-        }
+        // if screen_pos.1 < (infos.height_over_line * pt) as i32 {
+        //     return added_width;
+        // }
 
-        let true_pos = (screen_pos.0 + (total_text_width * pt) as i32,
+        let true_pos = (screen_pos.0 + ((total_text_width + infos.left_padding) * pt) as i32,
                         screen_pos.1 - (infos.height_over_line * pt) as i32);
 
         self.add_tex_internal(TexKind::Font(area, (ch_width, ch_height)), true_pos, clipping_rect, color);
 
-        added_width
+        infos.size.0 + infos.left_padding + infos.right_padding
     }
 }
 
@@ -441,39 +441,69 @@ impl UiWindow {
         renderer.repeat_tex("win", TexDir::Horizontal, (x + 32,       y + (h - 32), x + (w - 32), y + h), (16, 32), (32, 32));
         renderer.repeat_tex("win", TexDir::Vertical,   (x,            y + 32,       x + 32, y + (h - 32)),       (0,  16), (32, 32));
         renderer.repeat_tex("win", TexDir::Vertical,   (x + (w - 32), y + 32,       x + w, y + (h - 32)),       (32, 16), (32, 32));
-
-        for i in 0..10 {
-            UiText::new((x as i32 + 32, y as i32 + 32 * i), "Nyanko! Nyanko! Nyanko!").draw(renderer);
-        }
     }
 
     fn rect(&self) -> (u32, u32, u32, u32) {
-        let conv = |i| {
-            if i < 0 {
-                0
-            } else {
-                (i + 1) as u32
-            }
-        };
-
-        (conv(self.pos.0), conv(self.pos.1), conv(self.pos.0 + self.size.0), conv(self.pos.1 + self.size.1))
+        (self.pos.0, self.pos.1, self.pos.0 + self.size.0, self.pos.1 + self.size.1)
     }
 }
 
 pub struct UiText {
     pos: (i32, i32),
-    text: String,
+    text_lines: Vec<String>,
 }
 
 impl UiText {
     pub fn new(pos: (i32, i32), text: &str) -> Self {
+        let split = text.split("\n").map(|s| s.to_string()).collect::<Vec<String>>();
         UiText {
             pos: pos,
-            text: text.to_string(),
+            text_lines: split,
         }
     }
 
     pub fn draw(&self, renderer: &mut UiRenderer) {
-        renderer.add_string(self.pos, None, (0, 0, 0, 255), &self.text);
+        for (idx, line) in self.text_lines.iter().enumerate() {
+            let pos = (self.pos.0, self.pos.1 + (idx as u32 * renderer.font.get_font_size()) as i32);
+            renderer.add_string(pos, None, (0, 0, 0, 255), line);
+        }
+    }
+}
+
+pub struct UiList {
+    window: UiWindow,
+    items: Vec<UiText>,
+    selected: usize,
+}
+
+impl UiList {
+    pub fn new(pos: (u32, u32), items: Vec<&str>) -> Self {
+        let item_height = 20;
+        let mut text_items = Vec::new();
+        for (idx, item) in items.into_iter().enumerate() {
+            let pos = (pos.0 as i32 + 32, pos.1 as i32 + 32 + (item_height * idx as u32) as i32);
+            let text = UiText::new(pos, &item);
+            text_items.push(text);
+        }
+
+        let win = UiWindow::new(pos);
+
+        UiList {
+            window: win,
+            items: text_items,
+            selected: 0,
+        }
+    }
+
+    pub fn set_selected(&mut self, idx: usize) {
+        assert!(idx < self.items.len());
+        self.selected = idx;
+    }
+
+    pub fn draw(&self, renderer: &mut UiRenderer) {
+        self.window.draw(renderer);
+        for item in self.items.iter() {
+            item.draw(renderer);
+        }
     }
 }
