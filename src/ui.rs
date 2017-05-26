@@ -16,7 +16,7 @@ use texture_atlas::*;
 use util;
 
 #[derive(Clone, Copy, Debug)]
-struct AreaRect {
+pub struct AreaRect {
     x1: f32,
     y1: f32,
     x2: f32,
@@ -92,12 +92,14 @@ fn calc_tex_subarea(area: &texture_packer::Rect,
     let offset_xb = subarea.2 as f32 / area.w as f32;
     let offset_yb = subarea.3 as f32 / area.h as f32;
 
-    AreaRect {
+    let r = AreaRect {
         x1: area.x as f32 + offset_xa,
-        y1: area.y as f32 + offset_ya,
+        y1: 1.0 - (area.y as f32 + offset_ya),
         x2: area.x as f32 + offset_xb,
-        y2: area.y as f32 + offset_yb,
-    }
+        y2: 1.0 - (area.y as f32 + offset_yb),
+    };
+    println!("{:?} {:?}", r, area);
+    r
 }
 
 // 1. update state somehow
@@ -194,7 +196,7 @@ pub enum TexDir {
 
 pub enum TexKind {
     Elem(&'static str, (u32, u32), (u32, u32)),
-    Font(AreaRect, (u32, u32)),
+    Font(AreaRect),
 }
 
 impl UiRenderer {
@@ -257,12 +259,14 @@ impl UiRenderer {
             }
         }
 
-        let mut x = cxa;
-        let mut y = cya;
+        let mut x = cxa as i32;
+        let mut y = cya as i32;
+        let tw = tw as i32;
+        let th = th as i32;
 
         for _ in 0..(repeats_h + 1) {
             for _ in 0..(repeats_v + 1) {
-                let screen_pos = (x as i32, y as i32);
+                let screen_pos = (x, y, x + tw, y + th);
 
                 self.add_tex_internal(TexKind::Elem(key, tex_pos, tex_area),
                                       screen_pos,
@@ -272,12 +276,12 @@ impl UiRenderer {
                 y += th;
             }
             x += tw;
-            y = cya;
+            y = cya as i32;
         }
     }
 
     fn add_tex_internal(&mut self, kind: TexKind,
-                        screen_pos: (i32, i32),
+                        screen_pos: (i32, i32, i32, i32),
                         clip_rect: Option<(u32, u32, u32, u32)>,
                         color: (u8, u8, u8, u8)) {
         let tex_coords = match kind {
@@ -285,7 +289,7 @@ impl UiRenderer {
                 let atlas_area = self.ui_atlas.get_texture_area(key);
                 calc_tex_subarea(atlas_area, tex_pos, tex_area)
             },
-            TexKind::Font(coords, _) => coords,
+            TexKind::Font(coords) => coords,
         };
 
         let is_text = match kind {
@@ -304,13 +308,7 @@ impl UiRenderer {
             clip_rect: clip_rect,
         };
 
-        let (sx, sy) = screen_pos;
-        let (tw, th) = match kind {
-            TexKind::Elem(_, _, tex_area) => tex_area,
-            TexKind::Font(_, char_size) => char_size,
-        };
-        let tw = tw as i32;
-        let th = th as i32;
+        let (sxa, sya, sxb, syb) = screen_pos;
 
         let color = [color.0, color.1, color.2, color.3];
 
@@ -321,19 +319,19 @@ impl UiRenderer {
         // 1---2
 
         let vertices = vec! [
-            UiVertex { pos: [sx as f32, sy as f32],
+            UiVertex { pos: [sxa as f32, sya as f32],
                        tex_coords: [tex_coords.x1,
                                     tex_coords.y1],
                        color: color.clone() },
-            UiVertex { pos: [sx as f32, (sy + th) as f32],
+            UiVertex { pos: [sxa as f32, syb as f32],
                        tex_coords: [tex_coords.x1,
                                     tex_coords.y2],
                        color: color.clone() },
-            UiVertex { pos: [(sx + tw) as f32, (sy + th) as f32],
+            UiVertex { pos: [sxb as f32, syb as f32],
                        tex_coords: [tex_coords.x2,
                                     tex_coords.y2],
                        color: color.clone() },
-            UiVertex { pos: [(sx + tw) as f32, sy as f32],
+            UiVertex { pos: [sxb as f32, sya as f32],
                        tex_coords: [tex_coords.x2,
                                     tex_coords.y1],
                        color: color.clone() },
@@ -358,6 +356,22 @@ impl UiRenderer {
                    clip_rect: Option<(u32, u32, u32, u32)>,
                    tex_pos: (u32, u32),
                    tex_area: (u32, u32)) {
+        let (sx, sy) = screen_pos;
+        let (tw, th) = tex_area;
+
+        let true_screen_pos = (sx, sy, sx + tw as i32, sy + th as i32);
+
+        self.add_tex_internal(TexKind::Elem(key, tex_pos, tex_area),
+                              true_screen_pos,
+                              clip_rect,
+                              (255, 255, 255, 255));
+    }
+
+    pub fn add_tex_stretch(&mut self, key: &'static str,
+                           screen_pos: (i32, i32, i32, i32),
+                           clip_rect: Option<(u32, u32, u32, u32)>,
+                           tex_pos: (u32, u32),
+                           tex_area: (u32, u32)) {
         self.add_tex_internal(TexKind::Elem(key, tex_pos, tex_area),
                               screen_pos,
                               clip_rect,
@@ -406,10 +420,12 @@ impl UiRenderer {
         //     return added_width;
         // }
 
-        let true_pos = (screen_pos.0 + ((total_text_width + infos.left_padding) * pt) as i32,
+        let (sx, sy) = (screen_pos.0 + ((total_text_width + infos.left_padding) * pt) as i32,
                         screen_pos.1 - (infos.height_over_line * pt) as i32);
 
-        self.add_tex_internal(TexKind::Font(area, (ch_width, ch_height)), true_pos, clipping_rect, color);
+        let true_pos = (sx, sy, sx + ch_width as i32, sy + ch_height as i32);
+
+        self.add_tex_internal(TexKind::Font(area), true_pos, clipping_rect, color);
 
         infos.size.0 + infos.left_padding + infos.right_padding
     }
@@ -518,22 +534,28 @@ impl UiElement for UiWindow {
         let (w, h) = self.size;
 
         // center
+        renderer.add_tex_stretch("win",
+                                 (x as i32,     y as i32,
+                                  (x + w) as i32, (y + h) as i32),
+                                 None,
+                                 (0, 0), (64, 64));
+
         renderer.repeat_tex("win", TexDir::Area,
-                            (x + 32,       y + 32,
-                             x + (w - 32), y + (h - 32)),
-                            (16, 16), (32, 32));
+                            (x,     y,
+                            x + w,  y + h),
+                            (0, 64), (64, 64));
 
         // corners
-        renderer.add_tex("win",  (x as i32,              y as i32),               None, (0,  0),  (32, 32));
-        renderer.add_tex("win",  (x as i32,              (y + (h - 32)) as i32),  None, (0,  32), (32, 32));
-        renderer.add_tex("win",  ((x + (w - 32)) as i32, y as i32),               None, (32, 0),  (32, 32));
-        renderer.add_tex("win",  ((x + (w - 32)) as i32, (y + (h - 32)) as i32),  None, (32, 32), (32, 32));
+        renderer.add_tex("win",  (x as i32,              y as i32),               None, (64,  0), (16, 16));
+        renderer.add_tex("win",  (x as i32,              (y + (h - 16)) as i32),  None, (64, 48), (16, 16));
+        renderer.add_tex("win",  ((x + (w - 16)) as i32, y as i32),               None, (112, 0),  (16, 16));
+        renderer.add_tex("win",  ((x + (w - 16)) as i32, (y + (h - 16)) as i32),  None, (112, 48), (16, 16));
 
         // borders
-        renderer.repeat_tex("win", TexDir::Horizontal, (x + 32,       y,            x + (w - 32), y + 32),       (16, 0),  (32, 32));
-        renderer.repeat_tex("win", TexDir::Horizontal, (x + 32,       y + (h - 32), x + (w - 32), y + h),        (16, 32), (32, 32));
-        renderer.repeat_tex("win", TexDir::Vertical,   (x,            y + 32,       x + 32,       y + (h - 32)), (0,  16), (32, 32));
-        renderer.repeat_tex("win", TexDir::Vertical,   (x + (w - 32), y + 32,       x + w,        y + (h - 32)), (32, 16), (32, 32));
+        renderer.repeat_tex("win", TexDir::Horizontal, (x + 16,       y,            x + (w - 16), y + 16),       (80, 0),  (16, 16));
+        renderer.repeat_tex("win", TexDir::Horizontal, (x + 16,       y + (h - 16), x + (w - 16), y + h),        (80, 48), (16, 16));
+        renderer.repeat_tex("win", TexDir::Vertical,   (x,            y + 16,       x + 16,       y + (h - 16)), (64, 16), (16, 16));
+        renderer.repeat_tex("win", TexDir::Vertical,   (x + (w - 16), y + 16,       x + w,        y + (h - 16)), (112, 16), (16, 16));
     }
 }
 

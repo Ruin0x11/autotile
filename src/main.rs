@@ -109,11 +109,6 @@ fn main() {
 
         // polling and handling the events received by the window
         for event in display.poll_events() {
-            if ui.is_active() {
-                ui.update(event);
-                continue;
-            }
-
             match event {
                 glutin::Event::Closed => return Action::Stop,
                 glutin::Event::Resized(w, h) => {
@@ -123,7 +118,17 @@ fn main() {
                         scale: viewport.scale,
                         camera: viewport.camera,
                     };
+                    return Action::Continue;
                 },
+                _ => (),
+            }
+
+            if ui.is_active() {
+                ui.update(event);
+                return Action::Continue;
+            }
+
+            match event {
                 glutin::Event::KeyboardInput(ElementState::Pressed, _, Some(code)) => {
                     println!("Key: {:?}", code);
                     match code {
