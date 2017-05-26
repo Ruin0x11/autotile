@@ -182,7 +182,7 @@ impl TileManager {
         }
 
         let texture_idx = self.get_frame(tile_type).texture_idx;
-        let mut dimensions = self.textures.get(texture_idx).unwrap().dimensions();
+        let dimensions = self.textures.get(texture_idx).unwrap().dimensions();
 
         let cols: f32 = dimensions.0 as f32 / sx as f32;
         let rows: f32 = dimensions.1 as f32 / sy as f32;
@@ -205,28 +205,17 @@ impl TileManager {
                 TileKind::Static => (),
                 TileKind::Animated(frame_count, delay) => {
                     let current_frame = msecs / delay;
-                    let x_index_offset = if tile.is_autotile {
-                        (current_frame % frame_count) * 2
-                    } else {
-                        current_frame % frame_count
-                    };
+                    let mut x_index_offset = current_frame % frame_count;
+
+                    if tile.is_autotile {
+                        x_index_offset *= 2;
+                    }
+
                     add_offset.0 += x_index_offset as u32;
                 }
             }
 
             let mut ratio = 1;
-
-
-            if !tile.is_autotile {
-                let current_frame = msecs / 200;
-                let x_index_offset = if tile.is_autotile {
-                    (current_frame % 12) * 2
-                } else {
-                    current_frame % 12
-                };
-
-                add_offset.0 += x_index_offset as u32;
-            }
 
             if tile.is_autotile {
                 ratio = 2;
@@ -251,7 +240,8 @@ impl TileManager {
 }
 
 fn get_add_offset(rect: &Rect, tile_size: &(u32, u32)) -> (u32, u32) {
-    let cols: u32 = rect.x / tile_size.0;
-    let rows: u32 = rect.y / tile_size.1;
+    let ceil = |a, b| (a + b - 1) / b;
+    let cols: u32 = ceil(rect.x, tile_size.0);
+    let rows: u32 = ceil(rect.y, tile_size.1);
     (cols, rows)
 }

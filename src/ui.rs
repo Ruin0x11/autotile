@@ -108,37 +108,27 @@ fn calc_tex_subarea(area: &texture_packer::Rect,
 
 // For text, use the font atlas and output one texture piece for each glyph
 
-pub struct Ui<'a> {
-    backend: &'a ::glium::backend::glutin_backend::GlutinFacade,
+pub struct Ui {
     renderer: UiRenderer,
     valid: bool,
     layers: Vec<Box<UiLayer>>,
 }
 
-impl<'a> Ui<'a> {
-    pub fn new(window: &'a ::glium::backend::glutin_backend::GlutinFacade) -> Self {
+impl Ui {
+    pub fn new<F: Facade>(display: &F) -> Self {
         Ui {
-            backend: window,
-            renderer: UiRenderer::new(window),
+            renderer: UiRenderer::new(display),
             valid: true,
             layers: Vec::new(),
         }
     }
 
-    pub fn query<R, T: 'static + UiQuery<QueryResult=R>>(&mut self, layer: &mut T) -> R {
-        loop {
-            for event in self.backend.poll_events() {
-                match layer.on_event(event) {
-                    EventResult::Done => return layer.result(),
-                    _ => (),
-                }
-            }
-        }
-        layer.result()
-    }
-
     pub fn is_active(&self) -> bool {
         !self.layers.is_empty()
+    }
+
+    pub fn draw_layer<T: 'static + UiLayer>(&mut self, layer: &T) {
+        layer.draw(&mut self.renderer)
     }
 
     pub fn push_layer<T: 'static + UiLayer>(&mut self, layer: T) {
@@ -194,7 +184,7 @@ impl<'a> Ui<'a> {
     }
 }
 
-impl<'a> ::Renderable for Ui<'a> {
+impl<'a> ::Renderable for Ui {
     fn render<F, S>(&self, display: &F, target: &mut S, viewport: &::Viewport, msecs: u64)
         where F: glium::backend::Facade, S: glium::Surface {
 
@@ -410,8 +400,8 @@ impl UiRenderer {
 
         let mut total_text_width = 0.0;
         for ch in text.chars() { // FIXME: apparently wrong, but only thing stable
-            let added = self.add_char(screen_pos, clipping_rect, total_text_width, color, ch);
-            total_text_width += added;
+            let added_width_ems = self.add_char(screen_pos, clipping_rect, total_text_width, color, ch);
+            total_text_width += added_width_ems;
         }
     }
 
@@ -544,10 +534,6 @@ impl UiWindow {
             size: (300, 400),
         }
     }
-
-    fn rect(&self) -> (u32, u32, u32, u32) {
-        (self.pos.0, self.pos.1, self.pos.0 + self.size.0, self.pos.1 + self.size.1)
-    }
 }
 
 impl UiElement for UiWindow {
@@ -651,12 +637,6 @@ impl UiList {
     pub fn get_selected(&self) -> Option<&UiText> {
         self.items.get(self.selected)
     }
-
-    pub fn set_selected(&mut self, idx: usize) {
-        assert!(idx < self.items.len());
-        self.selected = idx;
-    }
-
 }
 
 impl UiElement for UiList {

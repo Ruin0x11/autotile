@@ -24,9 +24,11 @@ use std::time::{Duration, Instant};
 use glium::glutin;
 use glium::glutin::{VirtualKeyCode, ElementState};
 use glium::{DisplayBuild, Surface};
+use glium::backend::glutin_backend::GlutinFacade;
 
 use point::{Point, RectangleIter};
 
+use background::Background;
 use board::Board;
 use terrain::Terrain;
 use ui::*;
@@ -44,6 +46,108 @@ pub struct Viewport {
     camera: (i32, i32),
 }
 
+pub struct RenderContext {
+    backend: GlutinFacade,
+    ui: Ui,
+    background: Background,
+    spritemap: SpriteMap,
+    tilemap: TileMap,
+    pub viewport: Viewport,
+}
+
+impl RenderContext {
+    pub fn new() -> Self{
+        let display = glutin::WindowBuilder::new()
+            .with_vsync()
+            .with_dimensions(SCREEN_WIDTH, SCREEN_HEIGHT)
+            .build_glium()
+            .unwrap();
+
+        let bg = Background::new(&display);
+        let ui = Ui::new(&display);
+        let tile = TileMap::new(&display, "./data/map.png");
+        let sprite = SpriteMap::new(&display);
+
+        let scale = display.get_window().unwrap().hidpi_factor();
+
+        let viewport = Viewport {
+            position: (0, 0),
+            size: (SCREEN_WIDTH, SCREEN_HEIGHT),
+            scale: scale,
+            camera: (0, 0)
+        };
+
+        RenderContext {
+            backend: display,
+            background: bg,
+            ui: ui,
+            spritemap: sprite,
+            tilemap: tile,
+            viewport: viewport,
+        }
+    }
+
+    pub fn update(&mut self, board: &Board) {
+        self.tilemap.update(board);
+    }
+
+    pub fn refresh_shaders(&mut self) {
+        self.background.refresh_shaders(&self.backend);
+    }
+
+    pub fn render(&mut self, duration: &Duration) {
+        let mut target = self.backend.draw();
+        target.clear_color_and_depth((0.0, 0.0, 0.0, 0.0), 1.0);
+
+        let millis = get_duration_millis(duration);
+        self.background.render(&self.backend, &mut target, &self.viewport, millis);
+
+        self.tilemap.render(&self.backend, &mut target, &self.viewport, millis);
+        self.spritemap.render(&self.backend, &mut target, &self.viewport, millis);
+        self.ui.render(&self.backend, &mut target, &self.viewport, millis);
+
+        target.finish().unwrap();
+    }
+
+    pub fn set_viewport(&mut self, w: u32, h: u32) {
+        self.viewport = Viewport {
+            position: (0, 0),
+            size: (w, h),
+            scale: self.viewport.scale,
+            camera: self.viewport.camera,
+        };
+    }
+
+    pub fn poll_events(&self) -> Vec<glutin::Event> {
+        self.backend.poll_events().collect()
+    }
+
+    pub fn ui_active(&self) -> bool {
+        self.ui.is_active()
+    }
+
+    pub fn update_ui(&mut self, event: glutin::Event) {
+        self.ui.update(event);
+    }
+
+    pub fn query<R, T: 'static + UiQuery<QueryResult=R>>(&mut self, layer: &mut T) -> R {
+        loop {
+            for event in self.backend.poll_events() {
+                match layer.on_event(event) {
+                    EventResult::Done => {
+                        self.ui.clear();
+                        self.ui.invalidate();
+                        return layer.result();
+                    },
+                    _ => self.ui.draw_layer(layer),
+                }
+            }
+
+            self.render(&Duration::new(0, 0));
+        }
+    }
+}
+
 pub trait Renderable {
     fn render<F, S>(&self, display: &F, target: &mut S, viewport: &Viewport, msecs: u64)
         where F: glium::backend::Facade, S: glium::Surface;
@@ -55,12 +159,6 @@ fn get_duration_millis(duration: &Duration) -> u64 {
 }
 
 fn main() {
-    let display = glutin::WindowBuilder::new()
-        .with_vsync()
-        .with_dimensions(SCREEN_WIDTH, SCREEN_HEIGHT)
-        .build_glium()
-        .unwrap();
-
     let mut board = Board::new(20, 20, Terrain::Wall);
 
     for pos in RectangleIter::new(Point::new(2, 2), Point::new(8, 8)) {
@@ -74,43 +172,27 @@ fn main() {
     board.set(&Point::new(6, 6), Terrain::Wall);
     // board.set(&Point::new(5, 6), Terrain::Wall);
     // board.set(&Point::new(7, 6), Terrain::Wall);
-    // board.set(&Point::new(6, 5), Terrain::Wall);
-    // board.set(&Point::new(6, 7), Terrain::Wall);
+    board.set(&Point::new(6, 5), Terrain::Wall);
+    board.set(&Point::new(6, 7), Terrain::Wall);
 
-    // let tile = TileMap::new(&display, &board, "./data/map.png");
-    // let sprite = SpriteMap::new(&display);
+    let mut ctxt = RenderContext::new();
 
-    let scale = display.get_window().unwrap().hidpi_factor();
-
-    let mut viewport = Viewport {
-        position: (0, 0),
-        size: (SCREEN_WIDTH, SCREEN_HEIGHT),
-        scale: scale,
-        camera: (0, 0)
-    };
-
-    let mut ui = Ui::new(&display);
-    let mut window_open = false;
+    ctxt.update(&board);
 
     start_loop(|duration| {
         // polling and handling the events received by the window
-        for event in display.poll_events() {
+        for event in ctxt.poll_events() {
             match event {
                 glutin::Event::Closed => return Action::Stop,
                 glutin::Event::Resized(w, h) => {
-                    viewport = Viewport {
-                        position: (0, 0),
-                        size: (w, h),
-                        scale: viewport.scale,
-                        camera: viewport.camera,
-                    };
+                    ctxt.set_viewport(w, h);
                     return Action::Continue;
                 },
                 _ => (),
             }
 
-            if ui.is_active() {
-                ui.update(event);
+            if ctxt.ui_active() {
+                ctxt.update_ui(event);
                 return Action::Continue;
             }
 
@@ -123,20 +205,23 @@ fn main() {
                             return Action::Stop;
                         },
                         VirtualKeyCode::I => {
-                            let res = ui.query(&mut InvLayer::new());
+                            let res = ctxt.query(&mut InvLayer::new());
                             println!("{}", res);
                         },
                         VirtualKeyCode::Left => {
-                            viewport.camera.0 -= 48;
+                            ctxt.viewport.camera.0 -= 48;
                         },
                         VirtualKeyCode::Up => {
-                            viewport.camera.1 -= 48;
+                            ctxt.viewport.camera.1 -= 48;
                         },
                         VirtualKeyCode::Down => {
-                            viewport.camera.1 += 48;
+                            ctxt.viewport.camera.1 += 48;
                         },
                         VirtualKeyCode::Right => {
-                            viewport.camera.0 += 48;
+                            ctxt.viewport.camera.0 += 48;
+                        },
+                        VirtualKeyCode::R => {
+                            ctxt.refresh_shaders();
                         },
                         _ => (),
                     }
@@ -145,19 +230,7 @@ fn main() {
             }
         }
 
-        let mut target = display.draw();
-        target.clear_color_and_depth((0.0, 0.0, 0.0, 0.0), 1.0);
-
-        let millis = get_duration_millis(duration);
-        background::render_background(&display, &mut target, &viewport, millis);
-
-        // tile.render(&display, &mut target, &viewport, millis);
-
-        // sprite.render(&display, &mut target, &viewport, millis);
-
-        ui.render(&display, &mut target, &viewport, millis);
-
-        target.finish().unwrap();
+        ctxt.render(duration);
 
         Action::Continue
     })

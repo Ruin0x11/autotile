@@ -49,7 +49,7 @@ impl SpriteMap {
         builder.add_frame("./data/sprite2.png", (24, 24));
 
         let tile_manager = builder.add_tile("./data/sprite.png", 0, AtlasTile {
-            offset: (1, 1),
+            offset: (0, 0),
             is_autotile: false,
             tile_kind: TileKind::Static,
         })

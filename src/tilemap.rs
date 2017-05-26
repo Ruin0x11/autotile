@@ -52,21 +52,6 @@ pub struct TileMap {
     tile_manager: TileManager,
 }
 
-fn make_map(map: &Board) -> Vec<(DrawTile, Point)> {
-    let mut res = Vec::new();
-    for i in 0..(map.width()) {
-        for j in 0..(map.height()) {
-            let pos = Point::new(i, j);
-            let tile = DrawTile {
-                idx: map.get(&pos).n(),
-                edges: get_neighboring_edges(map, pos),
-            };
-            res.push((tile, pos));
-        }
-    }
-    res
-}
-
 fn dir_to_bit(dir: Direction) -> u8 {
     match dir {
         Direction::NE => 0,
@@ -159,8 +144,23 @@ fn get_autotile_index(edges: u8, quadrant: i8) -> i8 {
     }
 }
 
+fn make_map(map: &Board) -> Vec<(DrawTile, Point)> {
+    let mut res = Vec::new();
+    for i in 0..(map.width()) {
+        for j in 0..(map.height()) {
+            let pos = Point::new(i, j);
+            let tile = DrawTile {
+                idx: map.get(&pos).n(),
+                edges: get_neighboring_edges(map, pos),
+            };
+            res.push((tile, pos));
+        }
+    }
+    res
+}
+
 impl TileMap {
-    pub fn new<F: Facade>(display: &F, map: &Board, image_filename: &str) -> Self {
+    pub fn new<F: Facade>(display: &F, image_filename: &str) -> Self {
         let mut builder = TileManagerBuilder::new();
         builder.add_frame(image_filename, (48, 48));
         builder.add_frame("./data/map2.png", (48, 48));
@@ -184,15 +184,17 @@ impl TileMap {
         let fragment_shader = util::read_string("./data/tile.frag");
         let program = glium::Program::from_source(display, &vertex_shader, &fragment_shader, None).unwrap();
 
-        let map = make_map(map);
-
         TileMap {
-            map: map,
+            map: Vec::new(),
             indices: indices,
             vertices: vertices,
             program: program,
             tile_manager: tile_manager,
         }
+    }
+
+    pub fn update(&mut self, board: &Board) {
+        self.map = make_map(board);
     }
 
     fn create_instances<F>(&self, display: &F, pass: usize, msecs: u64) -> glium::VertexBuffer<Instance>
