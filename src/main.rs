@@ -80,8 +80,11 @@ fn main() {
     // let tile = TileMap::new(&display, &board, "./data/map.png");
     // let sprite = SpriteMap::new(&display);
     let mut ui = UiRenderer::new(&display);
-    let list = UiList::new((0, 0), vec!["Dood", "Hello, my dear", "end of days"]);
-    list.draw(&mut ui);
+    for _ in 0..10
+    {
+        let list = UiList::new((0, 0), vec!["Dood", "Hello, my dear", "end of days"]);
+        list.draw(&mut ui);
+    }
     let scale = display.get_window().unwrap().hidpi_factor();
 
     let mut viewport = Viewport {

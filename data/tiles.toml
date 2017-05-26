@@ -1,0 +1,11 @@
+[StoneBrick]
+atlas="map.png"
+offset=[6, 0]
+is_autotile=true
+
+[Water]
+atlas="map2.png"
+offset=[0, 0]
+is_autotile=true
+anim_frames=3
+anim_delay=400
