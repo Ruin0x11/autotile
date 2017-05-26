@@ -74,6 +74,7 @@ impl<'a> TextureAtlasBuilder<'a> {
         let image = ImageExporter::export(&self.packer).unwrap();
         let mut file = File::create("data/pack.png").unwrap();
         image.save(&mut file, image::PNG).unwrap();
+
         let texture = util::make_texture(display, image);
         let dim = texture.dimensions();
 
