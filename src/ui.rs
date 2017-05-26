@@ -1,8 +1,11 @@
 use std::fs::File;
 use std::path::Path;
+use std::ops::Deref;
+use std::rc::Rc;
 
 use cgmath;
 use glium;
+use glium::glutin;
 use glium::backend::Facade;
 use glium::index::PrimitiveType;
 use glium::Rect;
@@ -105,6 +108,76 @@ fn calc_tex_subarea(area: &texture_packer::Rect,
 
 // For text, use the font atlas and output one texture piece for each glyph
 
+pub struct Ui {
+    renderer: UiRenderer,
+    valid: bool,
+    layers: Vec<Box<UiLayer>>,
+}
+
+impl Ui {
+    pub fn new<F: Facade>(display: &F) -> Self {
+        Ui {
+            renderer: UiRenderer::new(display),
+            valid: true,
+            layers: Vec::new(),
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        !self.layers.is_empty()
+    }
+
+    pub fn push_layer<T: 'static + UiLayer>(&mut self, layer: T) {
+        self.layers.push(Box::new(layer));
+        self.invalidate();
+    }
+
+    pub fn pop_layer(&mut self) {
+        self.layers.pop();
+        self.invalidate();
+    }
+
+    pub fn clear(&mut self) {
+        self.renderer.clear();
+        self.valid = true;
+    }
+
+    pub fn update(&mut self, event: glutin::Event) {
+        if !self.valid {
+            for layer in self.layers.iter() {
+                layer.draw(&mut self.renderer);
+            }
+
+            self.valid = true;
+        }
+
+        let result = match self.layers.last_mut() {
+            None => EventResult::Ignored,
+            Some(layer) => layer.on_event(event),
+        };
+
+        match result {
+            EventResult::Ignored => (),
+            EventResult::Consumed(None) => (),
+            EventResult::Consumed(Some(cb)) => cb(self),
+        }
+    }
+
+    pub fn invalidate(&mut self) {
+        self.renderer.clear();
+        self.valid = false;
+        println!("invalidate ui");
+    }
+}
+
+impl<'a> ::Renderable for Ui {
+    fn render<F, S>(&self, display: &F, target: &mut S, viewport: &::Viewport, msecs: u64)
+        where F: glium::backend::Facade, S: glium::Surface {
+
+        self.renderer.render(display, target, viewport, msecs);
+    }
+}
+
 pub struct UiRenderer {
     ui_atlas: TextureAtlas,
     font: FontTexture,
@@ -151,10 +224,6 @@ impl UiRenderer {
             program: program,
             font_program: font_program,
         }
-    }
-
-    pub fn invalidate(&mut self) {
-        println!("invalidate ui");
     }
 
     pub fn clear(&mut self) {
@@ -518,6 +587,20 @@ impl UiList {
         }
     }
 
+    pub fn select_next(&mut self) {
+        if self.selected == self.items.len() - 1 {
+            return;
+        }
+        self.selected += 1;
+    }
+
+    pub fn select_prev(&mut self) {
+        if self.selected == 0 {
+            return;
+        }
+        self.selected -= 1;
+    }
+
     pub fn set_selected(&mut self, idx: usize) {
         assert!(idx < self.items.len());
         self.selected = idx;
@@ -531,5 +614,92 @@ impl UiElement for UiList {
         for item in self.items.iter() {
             item.draw(renderer);
         }
+    }
+}
+
+pub struct Callback(Rc<Box<Fn(&mut Ui)>>);
+
+impl Callback {
+    pub fn from_fn<F: Fn(&mut Ui) + 'static>(f: F) -> Self {
+        Callback(Rc::new(Box::new(f)))
+    }
+}
+
+impl Deref for Callback {
+    type Target = Box<Fn(&mut Ui)>;
+    fn deref<'a>(&'a self) -> &'a Box<Fn(&mut Ui)> {
+        &self.0
+    }
+}
+
+impl From<Rc<Box<Fn(&mut Ui)>>> for Callback {
+    fn from(f: Rc<Box<Fn(&mut Ui)>>) -> Self {
+        Callback(f)
+    }
+}
+
+impl From<Box<Fn(&mut Ui) + Send>> for Callback {
+    fn from(f: Box<Fn(&mut Ui) + Send>) -> Self {
+        Callback(Rc::new(f))
+    }
+}
+
+impl From<Box<Fn(&mut Ui)>> for Callback {
+    fn from(f: Box<Fn(&mut Ui)>) -> Self {
+        Callback(Rc::new(f))
+    }
+}
+
+pub enum EventResult {
+    Ignored,
+    Consumed(Option<Callback>),
+}
+
+pub trait UiLayer: UiElement {
+    fn on_event(&mut self, event: glutin::Event) -> EventResult;
+}
+
+pub struct InvLayer {
+    list: UiList,
+}
+
+impl InvLayer {
+    pub fn new() -> Self {
+        InvLayer {
+            list: UiList::new((100, 100), vec!["Dood", "Hello, my dear", "end of days"]),
+        }
+    }
+}
+
+impl UiElement for InvLayer {
+    fn draw(&self, renderer: &mut UiRenderer) {
+        self.list.draw(renderer);
+    }
+}
+
+use glium::glutin::{VirtualKeyCode, ElementState};
+
+impl UiLayer for InvLayer {
+    fn on_event(&mut self, event: glutin::Event) -> EventResult {
+        match event {
+            glutin::Event::KeyboardInput(ElementState::Pressed, _, Some(code)) => {
+                match code {
+                    VirtualKeyCode::Escape |
+                    VirtualKeyCode::Q => {
+                        let cb = Callback::from_fn(|ui| ui.pop_layer());
+                        return EventResult::Consumed(Some(cb));
+                    },
+                    VirtualKeyCode::Up => {
+                        self.list.select_next();
+                    },
+                    VirtualKeyCode::Down => {
+                        self.list.select_prev();
+                    },
+                    _ => (),
+                }
+            },
+            _ => (),
+        }
+        EventResult::Ignored
     }
 }

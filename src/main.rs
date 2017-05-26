@@ -79,12 +79,7 @@ fn main() {
 
     // let tile = TileMap::new(&display, &board, "./data/map.png");
     // let sprite = SpriteMap::new(&display);
-    let mut ui = UiRenderer::new(&display);
-    for _ in 0..10
-    {
-        let list = UiList::new((0, 0), vec!["Dood", "Hello, my dear", "end of days"]);
-        list.draw(&mut ui);
-    }
+
     let scale = display.get_window().unwrap().hidpi_factor();
 
     let mut viewport = Viewport {
@@ -94,6 +89,7 @@ fn main() {
         camera: (0, 0)
     };
 
+    let mut ui = Ui::new(&display);
     let mut window_open = false;
 
     start_loop(|duration| {
@@ -113,6 +109,11 @@ fn main() {
 
         // polling and handling the events received by the window
         for event in display.poll_events() {
+            if ui.is_active() {
+                ui.update(event);
+                continue;
+            }
+
             match event {
                 glutin::Event::Closed => return Action::Stop,
                 glutin::Event::Resized(w, h) => {
@@ -125,28 +126,13 @@ fn main() {
                 },
                 glutin::Event::KeyboardInput(ElementState::Pressed, _, Some(code)) => {
                     println!("Key: {:?}", code);
-                    if window_open {
-                        match code {
-                            VirtualKeyCode::Escape |
-                            VirtualKeyCode::Q => {
-                                window_open = false;
-                            },
-                            VirtualKeyCode::Up => {
-                                window.set_selected(window.selected() + 1);
-                            },
-                            VirtualKeyCode::Down => {
-                                window.set_selected(window.selected() - 1);
-                            },
-                            _ => (),
-                        }
-                        ui.invalidate();
-                    } else {
-                        
-                    }
                     match code {
                         VirtualKeyCode::Escape |
                         VirtualKeyCode::Q => {
                             return Action::Stop;
+                        },
+                        VirtualKeyCode::I => {
+                            ui.push_layer(InvLayer::new());
                         },
                         VirtualKeyCode::Left => {
                             viewport.camera.0 -= 48;
