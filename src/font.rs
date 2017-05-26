@@ -1,12 +1,13 @@
+// just a modification of glium_text compatible with the ui renderer
+
 extern crate libc;
 extern crate freetype_sys as freetype;
 
 use std;
-use glium::{self, DrawParameters};
+use glium;
 use glium::backend::Context;
 use glium::backend::Facade;
 use std::borrow::Cow;
-use std::default::Default;
 use std::io::Read;
 use std::ops::Deref;
 use std::rc::Rc;
@@ -17,6 +18,7 @@ use atlas_frame::Texture2d;
 pub struct FontTexture {
     texture: Texture2d,
     character_infos: Vec<(char, CharacterInfos)>,
+    font_size: u32,
 }
 
 /// Object that contains the elements shared by all `TextDisplay` objects.
@@ -147,8 +149,8 @@ impl FontTexture {
         let characters_list = unsafe {
             // TODO: unresolved symbol
             /*if freetype::FT_Select_CharMap(face, freetype::FT_ENCODING_UNICODE) != 0 {
-                return Err(());
-            }*/
+            return Err(());
+        }*/
 
             let mut result = Vec::new();
 
@@ -168,12 +170,30 @@ impl FontTexture {
             build_font_image(face, characters_list, font_size)
         };
 
+        use image;
+        use std;
+        let image = image::ImageBuffer::from_raw(texture_data.width,
+                                                 texture_data.height, texture_data.data.clone().iter()
+                                                 .flat_map(|d|
+                                                           {
+                                                               let a = (255.0 * d) as u8;
+                                                           vec![a, a, a, a]
+                                                           }).collect::<Vec<u8>>()).unwrap();
+
+        let image = image::DynamicImage::ImageRgba8(image).flipv();
+        let mut output = std::fs::File::create(&std::path::Path::new("./font.png")).unwrap();
+        image.save(&mut output, image::ImageFormat::PNG).unwrap();
+
+
+
+
         // we load the texture in the display
         let texture = Texture2d::new(facade, &texture_data).unwrap();
 
         Ok(FontTexture {
             texture: texture,
             character_infos: chr_infos,
+            font_size: font_size,
         })
     }
 
@@ -181,12 +201,14 @@ impl FontTexture {
         &self.texture
     }
 
+    pub fn get_font_size(&self) -> u32 {
+        self.font_size
+    }
+
     pub fn find_infos(&self, character: char) -> Option<CharacterInfos> {
         self.character_infos.iter().find(|&&(chr, _)| chr == character).map(|&(_, infos)| infos)
     }
 }
-
-// just a modification of glium_text compatible with the ui renderer
 
 unsafe fn build_font_image(face: freetype::FT_Face, characters_list: Vec<char>, font_size: u32)
                            -> (TextureData, Vec<(char, CharacterInfos)>)
@@ -210,7 +232,7 @@ unsafe fn build_font_image(face: freetype::FT_Face, characters_list: Vec<char>, 
     //  the texture is at least as wide as the widest character
     // we just try to estimate a width so that width ~= height
     let texture_width = get_nearest_po2(std::cmp::max(font_size * 2 as u32,
-        ((((characters_list.len() as u32) * font_size * font_size) as f32).sqrt()) as u32));
+                                                      ((((characters_list.len() as u32) * font_size * font_size) as f32).sqrt()) as u32));
 
     // we store the position of the "cursor" in the destination texture
     // this cursor points to the top-left pixel of the next character to write on the texture

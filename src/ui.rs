@@ -123,11 +123,13 @@ pub enum TexKind {
 
 impl UiRenderer {
     pub fn new<F: Facade>(display: &F) -> Self {
+        let font_size = 14;
+
         let font = FontTexture::new(display,
                                     File::open(&Path::new("./data/gohufont-14.ttf")).unwrap(),
-                                    24).unwrap();
+                                    font_size).unwrap();
 
-        let atlas = TextureAtlasBuilder::new()
+               let atlas = TextureAtlasBuilder::new()
             .add_texture("win")
             .build(display);
 
@@ -313,7 +315,7 @@ impl UiRenderer {
             y2: infos.tex_coords.1 + infos.tex_size.1,
         };
 
-        let pt = 14.0;
+        let pt = self.font.get_font_size() as f32;
 
         let (ch_width, ch_height) = ((infos.size.0 * pt) as u32, (infos.size.1 * pt) as u32);
         let added_width = infos.size.0 + infos.left_padding;
@@ -345,10 +347,6 @@ impl<'a> ::Renderable for UiRenderer {
         let scale = viewport.scale;
 
         let mut idx_start = 0;
-
-        if (msecs / 1000) % 2 == 0 {
-            println!("Draw commands: {}", self.draw_list.commands.len());
-        }
 
         for cmd in self.draw_list.commands.iter() {
             let idx_end = idx_start + cmd.elem_count;
