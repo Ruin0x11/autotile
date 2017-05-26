@@ -90,6 +90,8 @@ fn main() {
         camera: (0, 0)
     };
 
+    let mut window_open = false;
+
     start_loop(|duration| {
         let mut target = display.draw();
         target.clear_color_and_depth((0.0, 0.0, 0.0, 0.0), 1.0);
@@ -119,6 +121,24 @@ fn main() {
                 },
                 glutin::Event::KeyboardInput(ElementState::Pressed, _, Some(code)) => {
                     println!("Key: {:?}", code);
+                    if window_open {
+                        match code {
+                            VirtualKeyCode::Escape |
+                            VirtualKeyCode::Q => {
+                                window_open = false;
+                            },
+                            VirtualKeyCode::Up => {
+                                window.set_selected(window.selected() + 1);
+                            },
+                            VirtualKeyCode::Down => {
+                                window.set_selected(window.selected() - 1);
+                            },
+                            _ => (),
+                        }
+                        ui.invalidate();
+                    } else {
+                        
+                    }
                     match code {
                         VirtualKeyCode::Escape |
                         VirtualKeyCode::Q => {
