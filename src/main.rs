@@ -93,20 +93,6 @@ fn main() {
     let mut window_open = false;
 
     start_loop(|duration| {
-        let mut target = display.draw();
-        target.clear_color_and_depth((0.0, 0.0, 0.0, 0.0), 1.0);
-
-        let millis = get_duration_millis(duration);
-        background::render_background(&display, &mut target, &viewport, millis);
-
-        // tile.render(&display, &mut target, &viewport, millis);
-
-        // sprite.render(&display, &mut target, &viewport, millis);
-
-        ui.render(&display, &mut target, &viewport, millis);
-
-        target.finish().unwrap();
-
         // polling and handling the events received by the window
         for event in display.poll_events() {
             match event {
@@ -137,7 +123,8 @@ fn main() {
                             return Action::Stop;
                         },
                         VirtualKeyCode::I => {
-                            ui.push_layer(InvLayer::new());
+                            let res = ui.query(&mut InvLayer::new());
+                            println!("{}", res);
                         },
                         VirtualKeyCode::Left => {
                             viewport.camera.0 -= 48;
@@ -157,6 +144,20 @@ fn main() {
                 _ => ()
             }
         }
+
+        let mut target = display.draw();
+        target.clear_color_and_depth((0.0, 0.0, 0.0, 0.0), 1.0);
+
+        let millis = get_duration_millis(duration);
+        background::render_background(&display, &mut target, &viewport, millis);
+
+        // tile.render(&display, &mut target, &viewport, millis);
+
+        // sprite.render(&display, &mut target, &viewport, millis);
+
+        ui.render(&display, &mut target, &viewport, millis);
+
+        target.finish().unwrap();
 
         Action::Continue
     })

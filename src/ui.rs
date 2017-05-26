@@ -92,14 +92,12 @@ fn calc_tex_subarea(area: &texture_packer::Rect,
     let offset_xb = subarea.2 as f32 / area.w as f32;
     let offset_yb = subarea.3 as f32 / area.h as f32;
 
-    let r = AreaRect {
+    AreaRect {
         x1: area.x as f32 + offset_xa,
         y1: 1.0 - (area.y as f32 + offset_ya),
         x2: area.x as f32 + offset_xb,
         y2: 1.0 - (area.y as f32 + offset_yb),
-    };
-    println!("{:?} {:?}", r, area);
-    r
+    }
 }
 
 // 1. update state somehow
@@ -110,19 +108,33 @@ fn calc_tex_subarea(area: &texture_packer::Rect,
 
 // For text, use the font atlas and output one texture piece for each glyph
 
-pub struct Ui {
+pub struct Ui<'a> {
+    backend: &'a ::glium::backend::glutin_backend::GlutinFacade,
     renderer: UiRenderer,
     valid: bool,
     layers: Vec<Box<UiLayer>>,
 }
 
-impl Ui {
-    pub fn new<F: Facade>(display: &F) -> Self {
+impl<'a> Ui<'a> {
+    pub fn new(window: &'a ::glium::backend::glutin_backend::GlutinFacade) -> Self {
         Ui {
-            renderer: UiRenderer::new(display),
+            backend: window,
+            renderer: UiRenderer::new(window),
             valid: true,
             layers: Vec::new(),
         }
+    }
+
+    pub fn query<R, T: 'static + UiQuery<QueryResult=R>>(&mut self, layer: &mut T) -> R {
+        loop {
+            for event in self.backend.poll_events() {
+                match layer.on_event(event) {
+                    EventResult::Done => return layer.result(),
+                    _ => (),
+                }
+            }
+        }
+        layer.result()
     }
 
     pub fn is_active(&self) -> bool {
@@ -145,14 +157,6 @@ impl Ui {
     }
 
     pub fn update(&mut self, event: glutin::Event) {
-        if !self.valid {
-            for layer in self.layers.iter() {
-                layer.draw(&mut self.renderer);
-            }
-
-            self.valid = true;
-        }
-
         let result = match self.layers.last_mut() {
             None => EventResult::Ignored,
             Some(layer) => layer.on_event(event),
@@ -160,19 +164,37 @@ impl Ui {
 
         match result {
             EventResult::Ignored => (),
-            EventResult::Consumed(None) => (),
-            EventResult::Consumed(Some(cb)) => cb(self),
+            EventResult::Consumed(callback) => {
+                self.invalidate();
+                match callback {
+                    None => (),
+                    Some(cb) => cb(self)
+                }
+            }
+            EventResult::Done => self.pop_layer(),
+        }
+
+        self.redraw();
+    }
+
+    fn redraw(&mut self) {
+        if !self.valid {
+            self.renderer.clear();
+            for layer in self.layers.iter() {
+                layer.draw(&mut self.renderer);
+            }
+
+            self.valid = true;
         }
     }
 
     pub fn invalidate(&mut self) {
-        self.renderer.clear();
         self.valid = false;
         println!("invalidate ui");
     }
 }
 
-impl<'a> ::Renderable for Ui {
+impl<'a> ::Renderable for Ui<'a> {
     fn render<F, S>(&self, display: &F, target: &mut S, viewport: &::Viewport, msecs: u64)
         where F: glium::backend::Facade, S: glium::Surface {
 
@@ -560,7 +582,7 @@ impl UiElement for UiWindow {
 }
 
 pub struct UiText {
-    pos: (i32, i32),
+    pub pos: (i32, i32),
     text_lines: Vec<String>,
 }
 
@@ -573,6 +595,9 @@ impl UiText {
         }
     }
 
+    pub fn text(&self) -> String {
+        self.text_lines.join("\n")
+    }
 }
 
 impl UiElement for UiText {
@@ -623,6 +648,10 @@ impl UiList {
         self.selected -= 1;
     }
 
+    pub fn get_selected(&self) -> Option<&UiText> {
+        self.items.get(self.selected)
+    }
+
     pub fn set_selected(&mut self, idx: usize) {
         assert!(idx < self.items.len());
         self.selected = idx;
@@ -635,6 +664,10 @@ impl UiElement for UiList {
         self.window.draw(renderer);
         for item in self.items.iter() {
             item.draw(renderer);
+        }
+        if let Some(item) = self.get_selected() {
+            let (ix, iy) = item.pos;
+            renderer.add_tex("win", (ix - 16, iy - 12), None, (96, 24), (16, 16));
         }
     }
 }
@@ -675,6 +708,7 @@ impl From<Box<Fn(&mut Ui)>> for Callback {
 pub enum EventResult {
     Ignored,
     Consumed(Option<Callback>),
+    Done
 }
 
 pub trait UiLayer: UiElement {
@@ -688,7 +722,7 @@ pub struct InvLayer {
 impl InvLayer {
     pub fn new() -> Self {
         InvLayer {
-            list: UiList::new((100, 100), vec!["Dood", "Hello, my dear", "end of days"]),
+            list: UiList::new((100, 100), vec!["Dood", "Hello, my dear", "end of days", "something", "something else", "starfruit"]),
         }
     }
 }
@@ -707,21 +741,37 @@ impl UiLayer for InvLayer {
             glutin::Event::KeyboardInput(ElementState::Pressed, _, Some(code)) => {
                 match code {
                     VirtualKeyCode::Escape |
+                    VirtualKeyCode::Return |
                     VirtualKeyCode::Q => {
-                        let cb = Callback::from_fn(|ui| ui.pop_layer());
-                        return EventResult::Consumed(Some(cb));
+                        EventResult::Done
                     },
                     VirtualKeyCode::Up => {
-                        self.list.select_next();
+                        self.list.select_prev();
+                        EventResult::Consumed(None)
                     },
                     VirtualKeyCode::Down => {
-                        self.list.select_prev();
+                        self.list.select_next();
+                        println!("{}", self.list.selected);
+                        EventResult::Consumed(None)
                     },
-                    _ => (),
+                    _ => EventResult::Ignored,
                 }
             },
-            _ => (),
+            _ => EventResult::Ignored,
         }
-        EventResult::Ignored
     }
+}
+
+impl UiQuery for InvLayer {
+    type QueryResult = String;
+
+    fn result(&self) -> String {
+        self.list.get_selected().unwrap().text()
+    }
+}
+
+pub trait UiQuery: UiLayer {
+    type QueryResult;
+
+    fn result(&self) -> Self::QueryResult;
 }
