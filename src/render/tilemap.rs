@@ -3,19 +3,13 @@ use glium::backend::Facade;
 use glium::index::PrimitiveType;
 use cgmath;
 
-use atlas_frame::*;
+use atlas::*;
 use board::Board;
 use point::Direction;
 use point::Point;
 use point;
 use util;
-
-#[derive(Copy, Clone)]
-pub struct Vertex {
-    pub position: [i32; 2],
-}
-
-implement_vertex!(Vertex, position);
+use render::{Renderable, Viewport, Vertex, QUAD, QUAD_INDICES};
 
 #[derive(Copy, Clone)]
 struct Instance {
@@ -28,14 +22,6 @@ struct Instance {
 
 implement_vertex!(Instance, map_coord, tex_offset, quadrant, autotile,
                   autotile_index);
-
-pub const QUAD_INDICES: [u16; 6] = [0, 1, 2, 1, 3, 2];
-pub const QUAD: [Vertex; 4] = [
-    Vertex { position: [0, 1], },
-    Vertex { position: [1, 1], },
-    Vertex { position: [0, 0], },
-    Vertex { position: [1, 0], },
-];
 
 struct DrawTile {
     idx: usize,
@@ -160,14 +146,14 @@ fn make_map(map: &Board) -> Vec<(DrawTile, Point)> {
 }
 
 impl TileMap {
-    pub fn new<F: Facade>(display: &F, image_filename: &str) -> Self {
-        let tile_manager = TileManager::from_config(display, "./data/tiles.toml");
+    pub fn new<F: Facade>(display: &F) -> Self {
+        let tile_manager = TileManager::from_config(display, "data/tiles.toml");
 
         let vertices = glium::VertexBuffer::immutable(display, &QUAD).unwrap();
         let indices = glium::IndexBuffer::immutable(display, PrimitiveType::TrianglesList, &QUAD_INDICES).unwrap();
 
-        let vertex_shader = util::read_string("./data/tile.vert");
-        let fragment_shader = util::read_string("./data/tile.frag");
+        let vertex_shader = util::read_string("data/tile.vert");
+        let fragment_shader = util::read_string("data/tile.frag");
         let program = glium::Program::from_source(display, &vertex_shader, &fragment_shader, None).unwrap();
 
         TileMap {
@@ -212,8 +198,8 @@ impl TileMap {
     }
 }
 
-impl<'a> ::Renderable for TileMap {
-    fn render<F, S>(&self, display: &F, target: &mut S, viewport: &::Viewport, msecs: u64)
+impl<'a> Renderable for TileMap {
+    fn render<F, S>(&self, display: &F, target: &mut S, viewport: &Viewport, msecs: u64)
         where F: glium::backend::Facade, S: glium::Surface {
 
         let (w, h) = (viewport.size.0 as f32, viewport.size.1 as f32);

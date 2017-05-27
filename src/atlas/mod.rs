@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::path::Path;
 
-use atlas_config;
 use glium;
 use glium::backend::Facade;
 use image::{self, DynamicImage, GenericImage, Rgba};
@@ -12,7 +11,11 @@ use texture_packer::{TexturePacker, TexturePackerConfig};
 use texture_packer::importer::ImageImporter;
 use texture_packer::exporter::ImageExporter;
 
-use util;
+mod config;
+pub mod font;
+pub mod texture_atlas;
+
+use self::config::TileManagerConfig;
 
 pub type TileOffset = (u32, u32);
 pub type TileIndex = usize;
@@ -73,13 +76,6 @@ impl AtlasFrame {
 }
 
 pub type TilePacker<'a> = TexturePacker<'a, DynamicImage, SkylinePacker<Rgba<u8>>>;
-
-#[derive(Serialize, Deserialize)]
-pub struct TileManagerConfig {
-    locations: HashMap<TileIndex, String>,
-    frames: HashMap<String, AtlasFrame>,
-    pub file_hash: String,
-}
 
 pub struct TileManager {
     config: TileManagerConfig,
@@ -167,7 +163,7 @@ impl <'a> TileManagerBuilder<'a> {
     pub fn build<F: Facade>(&self, display: &F, packed_tex_folder: &str) -> TileManager {
         let mut textures = Vec::new();
 
-        let packed_folder_path = atlas_config::get_config_cache_path(packed_tex_folder);
+        let packed_folder_path = config::get_config_cache_path(packed_tex_folder);
 
         if Path::exists(packed_folder_path.as_path()) {
             fs::remove_dir_all(packed_folder_path.as_path()).unwrap();
@@ -184,7 +180,7 @@ impl <'a> TileManagerBuilder<'a> {
             let mut file = File::create(file_path).unwrap();
 
             image.save(&mut file, image::PNG).unwrap();
-            textures.push(util::make_texture(display, image));
+            textures.push(make_texture(display, image));
         }
 
         println!("Saved {}", packed_tex_folder);
@@ -195,7 +191,7 @@ impl <'a> TileManagerBuilder<'a> {
             file_hash: self.file_hash.clone(),
         };
 
-        atlas_config::write_tile_manager_config(&config, packed_tex_folder);
+        config::write_tile_manager_config(&config, packed_tex_folder);
 
         TileManager {
             config: config,
@@ -296,18 +292,6 @@ impl TileManager {
     pub fn passes(&self) -> usize {
         self.textures.len()
     }
-
-    pub fn add_tile(&mut self, path_str: &str, index: TileIndex, tile_data: AtlasTile) {
-        let key = path_str.to_string();
-        assert!(self.config.frames.contains_key(&path_str.to_string()));
-
-        {
-            let mut frame = self.config.frames.get_mut(&key).unwrap();
-            assert!(!frame.offsets.contains_key(&index));
-            frame.offsets.insert(index, tile_data);
-            self.config.locations.insert(index, key);
-        }
-    }
 }
 
 fn get_add_offset(rect: &AtlasRect, tile_size: &(u32, u32)) -> (u32, u32) {
@@ -315,4 +299,10 @@ fn get_add_offset(rect: &AtlasRect, tile_size: &(u32, u32)) -> (u32, u32) {
     let cols: u32 = ceil(rect.x, tile_size.0);
     let rows: u32 = ceil(rect.y, tile_size.1);
     (cols, rows)
+}
+
+pub fn make_texture<F: Facade>(display: &F, image: DynamicImage) -> Texture2d {
+    let dimensions = image.dimensions();
+    let image = glium::texture::RawImage2d::from_raw_rgba_reversed(image.to_rgba().into_raw(), dimensions);
+    Texture2d::new(display, image).unwrap()
 }

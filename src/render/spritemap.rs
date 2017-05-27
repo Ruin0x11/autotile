@@ -3,9 +3,9 @@ use glium::backend::Facade;
 use glium::index::PrimitiveType;
 use cgmath;
 
-use atlas_frame::*;
+use atlas::*;
 use point::Point;
-use tilemap::{QUAD, QUAD_INDICES, Vertex};
+use render::{Renderable, Viewport, Vertex, QUAD, QUAD_INDICES};
 use util;
 
 #[derive(Copy, Clone)]
@@ -44,13 +44,13 @@ fn make_map() -> Vec<(DrawSprite, Point)> {
 
 impl SpriteMap {
     pub fn new<F: Facade>(display: &F) -> Self {
-        let tile_manager = TileManager::from_config(display, "./data/sprites.toml");
+        let tile_manager = TileManager::from_config(display, "data/sprites.toml");
 
         let vertices = glium::VertexBuffer::immutable(display, &QUAD).unwrap();
         let indices = glium::IndexBuffer::immutable(display, PrimitiveType::TrianglesList, &QUAD_INDICES).unwrap();
 
-        let vertex_shader = util::read_string("./data/sprite.vert");
-        let fragment_shader = util::read_string("./data/sprite.frag");
+        let vertex_shader = util::read_string("data/sprite.vert");
+        let fragment_shader = util::read_string("data/sprite.frag");
         let program = glium::Program::from_source(display, &vertex_shader, &fragment_shader, None).unwrap();
 
         let sprites = make_map();
@@ -88,8 +88,8 @@ impl SpriteMap {
     }
 }
 
-impl<'a> ::Renderable for SpriteMap {
-    fn render<F, S>(&self, display: &F, target: &mut S, viewport: &::Viewport, msecs: u64)
+impl<'a> Renderable for SpriteMap {
+    fn render<F, S>(&self, display: &F, target: &mut S, viewport: &Viewport, msecs: u64)
         where F: glium::backend::Facade, S: glium::Surface {
 
         let (w, h) = (viewport.size.0 as f32, viewport.size.1 as f32);

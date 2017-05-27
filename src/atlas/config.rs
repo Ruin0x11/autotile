@@ -11,8 +11,15 @@ use glob;
 use image;
 use toml::Value;
 
-use atlas_frame::*;
+use atlas::*;
 use util;
+
+#[derive(Serialize, Deserialize)]
+pub struct TileManagerConfig {
+    pub locations: HashMap<TileIndex, String>,
+    pub frames: HashMap<String, AtlasFrame>,
+    pub file_hash: String,
+}
 
 pub fn get_config_cache_path(config_name: &str) -> PathBuf {
     let cache_filepath_str = format!("data/.packed/{}", config_name);
@@ -25,7 +32,7 @@ pub fn load_tile_manager_config(config_name: &str) -> TileManagerConfig {
 
     let mut file = File::open(path).unwrap();
     let mut buf = Vec::new();
-    file.read_to_end(&mut buf);
+    file.read_to_end(&mut buf).unwrap();
     bincode::deserialize(buf.as_slice()).unwrap()
 }
 
@@ -74,7 +81,7 @@ impl TileManager {
             match entry {
                 Ok(path) => {
                     let image = image::open(&path).unwrap();
-                    let texture = util::make_texture(display, image);
+                    let texture = make_texture(display, image);
                     textures.push(texture);
                 },
                 Err(..) => (),
@@ -101,7 +108,7 @@ impl TileManager {
         for map in maps.iter() {
             let name: String = util::toml::expect_value_in_table(&map, "name");
             let tile_size: [u32; 2] = util::toml::expect_value_in_table(&map, "tile_size");
-            let file_path = format!("./data/texture/{}", name);
+            let file_path = format!("data/texture/{}", name);
             println!("Load: {}", file_path);
             builder.add_frame(&file_path, (tile_size[0], tile_size[1]));
         }
@@ -130,7 +137,7 @@ impl TileManager {
                 tile_kind: tile_kind,
             };
 
-            let file_path = format!("./data/texture/{}", atlas);
+            let file_path = format!("data/texture/{}", atlas);
             builder.add_tile(&file_path, idx, tile);
 
             idx += 1;

@@ -1,4 +1,3 @@
-use std::slice;
 use std::ops::Add;
 
 use rand::{self, Rng};

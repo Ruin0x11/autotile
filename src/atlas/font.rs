@@ -4,18 +4,14 @@
 use std;
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::default::Default;
 use std::io::Read;
-use std::ops::Deref;
-use std::rc::Rc;
 
 use rusttype::{self, Rect, Point};
 
-use glium::{self, DrawParameters};
-use glium::backend::Context;
+use glium;
 use glium::backend::Facade;
 
-use atlas_frame::Texture2d;
+use atlas::Texture2d;
 
 /// Texture which contains the characters of the font.
 pub struct FontTexture {
@@ -24,29 +20,10 @@ pub struct FontTexture {
     font_size: u32,
 }
 
-/// 
 #[derive(Debug)]
 pub enum Error {
     /// A glyph for this character is not present in font.
     NoGlyph(char),
-}
-
-/// Object that contains the elements shared by all `TextDisplay` objects.
-///
-/// Required to create a `TextDisplay`.
-pub struct TextSystem {
-    context: Rc<Context>,
-    program: glium::Program,
-}
-
-/// Object that will allow you to draw a text.
-pub struct TextDisplay<F> where F: Deref<Target=FontTexture> {
-    context: Rc<Context>,
-    texture: F,
-    vertex_buffer: Option<glium::VertexBuffer<VertexFormat>>,
-    index_buffer: Option<glium::IndexBuffer<u16>>,
-    total_text_width: f32,
-    is_empty: bool,
 }
 
 // structure containing informations about a character of a font

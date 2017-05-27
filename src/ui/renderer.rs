@@ -1,18 +1,16 @@
 use std::fs::File;
 use std::path::Path;
-use std::ops::Deref;
-use std::rc::Rc;
 
 use cgmath;
 use glium;
-use glium::glutin;
 use glium::backend::Facade;
 use glium::index::PrimitiveType;
 use glium::Rect;
 use texture_packer;
 
-use font::FontTexture;
-use texture_atlas::*;
+use atlas::font::FontTexture;
+use atlas::texture_atlas::*;
+use render::{Renderable, Viewport};
 use util;
 
 #[derive(Clone, Copy, Debug)]
@@ -56,8 +54,7 @@ impl UiDrawList {
         };
 
         if should_merge {
-            let last_idx = self.commands.len() - 1;
-            let last_mut = self.commands.get_mut(last_idx).unwrap();
+            let last_mut = self.commands.last_mut().unwrap();
             last_mut.elem_count += cmd.elem_count;
         } else {
             self.commands.push(cmd);
@@ -100,106 +97,6 @@ fn calc_tex_subarea(area: &texture_packer::Rect,
     }
 }
 
-// 1. update state somehow
-// 2. output vertices of texture coordinates inside UI texture atlas
-
-// self.bar.update(BarData { current: 100, max: 1000 }):
-// drawlist.extend(self.bar.output());
-
-// For text, use the font atlas and output one texture piece for each glyph
-
-pub struct Ui {
-    renderer: UiRenderer,
-    valid: bool,
-    layers: Vec<Box<UiLayer>>,
-}
-
-impl Ui {
-    pub fn new<F: Facade>(display: &F) -> Self {
-        Ui {
-            renderer: UiRenderer::new(display),
-            valid: true,
-            layers: Vec::new(),
-        }
-    }
-
-    pub fn is_active(&self) -> bool {
-        !self.layers.is_empty()
-    }
-
-    pub fn draw_layer<T: 'static + UiLayer>(&mut self, layer: &T) {
-        layer.draw(&mut self.renderer)
-    }
-
-    pub fn push_layer<T: 'static + UiLayer>(&mut self, layer: T) {
-        self.layers.push(Box::new(layer));
-        self.invalidate();
-    }
-
-    pub fn pop_layer(&mut self) {
-        self.layers.pop();
-        self.invalidate();
-    }
-
-    pub fn clear(&mut self) {
-        self.renderer.clear();
-        self.valid = true;
-    }
-
-    pub fn update(&mut self, event: glutin::Event) {
-        let result = match self.layers.last_mut() {
-            None => EventResult::Ignored,
-            Some(layer) => layer.on_event(event),
-        };
-
-        match result {
-            EventResult::Ignored => (),
-            EventResult::Consumed(callback) => {
-                self.invalidate();
-                match callback {
-                    None => (),
-                    Some(cb) => cb(self)
-                }
-            }
-            EventResult::Done => self.pop_layer(),
-        }
-
-        self.redraw();
-    }
-
-    fn redraw(&mut self) {
-        if !self.valid {
-            self.renderer.clear();
-            for layer in self.layers.iter() {
-                layer.draw(&mut self.renderer);
-            }
-
-            self.valid = true;
-        }
-    }
-
-    pub fn invalidate(&mut self) {
-        self.valid = false;
-        println!("invalidate ui");
-    }
-}
-
-impl<'a> ::Renderable for Ui {
-    fn render<F, S>(&self, display: &F, target: &mut S, viewport: &::Viewport, msecs: u64)
-        where F: glium::backend::Facade, S: glium::Surface {
-
-        self.renderer.render(display, target, viewport, msecs);
-    }
-}
-
-pub struct UiRenderer {
-    ui_atlas: TextureAtlas,
-    font: FontTexture,
-    draw_list: UiDrawList,
-    program: glium::Program,
-    font_program: glium::Program,
-}
-
 pub enum TexDir {
     Horizontal,
     Vertical,
@@ -211,12 +108,20 @@ pub enum TexKind {
     Font(AreaRect),
 }
 
+pub struct UiRenderer {
+    ui_atlas: TextureAtlas,
+    font: FontTexture,
+    draw_list: UiDrawList,
+    program: glium::Program,
+    font_program: glium::Program,
+}
+
 impl UiRenderer {
     pub fn new<F: Facade>(display: &F) -> Self {
         let font_size = 14;
 
         let font = FontTexture::new(display,
-                                    File::open(&Path::new("./data/gohufont-14.ttf")).unwrap(),
+                                    File::open(&Path::new("data/gohufont-14.ttf")).unwrap(),
                                     font_size,
                                     FontTexture::ascii_character_list()).unwrap();
 
@@ -224,11 +129,11 @@ impl UiRenderer {
             .add_texture("win")
             .build(display);
 
-        let vertex_shader = util::read_string("./data/identity.vert");
-        let fragment_shader = util::read_string("./data/identity.frag");
+        let vertex_shader = util::read_string("data/identity.vert");
+        let fragment_shader = util::read_string("data/identity.frag");
         let program = glium::Program::from_source(display, &vertex_shader, &fragment_shader, None).unwrap();
 
-        let font_fragment_shader = util::read_string("./data/font.frag");
+        let font_fragment_shader = util::read_string("data/font.frag");
         let font_program = glium::Program::from_source(display, &vertex_shader, &font_fragment_shader, None).unwrap();
 
         UiRenderer {
@@ -242,6 +147,10 @@ impl UiRenderer {
 
     pub fn clear(&mut self) {
         self.draw_list.clear();
+    }
+
+    pub fn get_font_size(&self) -> u32 {
+        self.font.get_font_size()
     }
 
     pub fn repeat_tex(&mut self, key: &'static str,
@@ -453,8 +362,8 @@ fn make_scissor(clip_rect: (f32, f32, f32, f32), height: f32, scale: f32) -> Rec
     }
 }
 
-impl<'a> ::Renderable for UiRenderer {
-    fn render<F, S>(&self, display: &F, target: &mut S, viewport: &::Viewport, msecs: u64)
+impl<'a> Renderable for UiRenderer {
+    fn render<F, S>(&self, display: &F, target: &mut S, viewport: &Viewport, msecs: u64)
         where F: glium::backend::Facade, S: glium::Surface {
 
         let (w, h) = (viewport.size.0 as f32, viewport.size.1 as f32);
@@ -516,242 +425,4 @@ impl<'a> ::Renderable for UiRenderer {
             }
         }
     }
-}
-
-pub trait UiElement {
-    fn draw(&self, renderer: &mut UiRenderer);
-}
-
-pub struct UiWindow {
-    pos: (u32, u32),
-    size: (u32, u32),
-}
-
-impl UiWindow {
-    pub fn new(pos: (u32, u32)) -> Self {
-        UiWindow {
-            pos: pos,
-            size: (300, 400),
-        }
-    }
-}
-
-impl UiElement for UiWindow {
-    fn draw(&self, renderer: &mut UiRenderer) {
-        let (x, y) = self.pos;
-        let (w, h) = self.size;
-
-        // center
-        renderer.add_tex_stretch("win",
-                                 (x as i32,     y as i32,
-                                  (x + w) as i32, (y + h) as i32),
-                                 None,
-                                 (0, 0), (64, 64));
-
-        renderer.repeat_tex("win", TexDir::Area,
-                            (x,     y,
-                            x + w,  y + h),
-                            (0, 64), (64, 64));
-
-        // corners
-        renderer.add_tex("win",  (x as i32,              y as i32),               None, (64,  0), (16, 16));
-        renderer.add_tex("win",  (x as i32,              (y + (h - 16)) as i32),  None, (64, 48), (16, 16));
-        renderer.add_tex("win",  ((x + (w - 16)) as i32, y as i32),               None, (112, 0),  (16, 16));
-        renderer.add_tex("win",  ((x + (w - 16)) as i32, (y + (h - 16)) as i32),  None, (112, 48), (16, 16));
-
-        // borders
-        renderer.repeat_tex("win", TexDir::Horizontal, (x + 16,       y,            x + (w - 16), y + 16),       (80, 0),  (16, 16));
-        renderer.repeat_tex("win", TexDir::Horizontal, (x + 16,       y + (h - 16), x + (w - 16), y + h),        (80, 48), (16, 16));
-        renderer.repeat_tex("win", TexDir::Vertical,   (x,            y + 16,       x + 16,       y + (h - 16)), (64, 16), (16, 16));
-        renderer.repeat_tex("win", TexDir::Vertical,   (x + (w - 16), y + 16,       x + w,        y + (h - 16)), (112, 16), (16, 16));
-    }
-}
-
-pub struct UiText {
-    pub pos: (i32, i32),
-    text_lines: Vec<String>,
-}
-
-impl UiText {
-    pub fn new(pos: (i32, i32), text: &str) -> Self {
-        let split = text.split("\n").map(|s| s.to_string()).collect::<Vec<String>>();
-        UiText {
-            pos: pos,
-            text_lines: split,
-        }
-    }
-
-    pub fn text(&self) -> String {
-        self.text_lines.join("\n")
-    }
-}
-
-impl UiElement for UiText {
-    fn draw(&self, renderer: &mut UiRenderer) {
-        for (idx, line) in self.text_lines.iter().enumerate() {
-            let pos = (self.pos.0, self.pos.1 + (idx as u32 * renderer.font.get_font_size()) as i32);
-            renderer.add_string(pos, None, (0, 0, 0, 255), line);
-        }
-    }
-}
-
-pub struct UiList {
-    window: UiWindow,
-    items: Vec<UiText>,
-    selected: usize,
-}
-
-impl UiList {
-    pub fn new(pos: (u32, u32), items: Vec<&str>) -> Self {
-        let item_height = 20;
-        let mut text_items = Vec::new();
-        for (idx, item) in items.into_iter().enumerate() {
-            let pos = (pos.0 as i32 + 32, pos.1 as i32 + 32 + (item_height * idx as u32) as i32);
-            let text = UiText::new(pos, &item);
-            text_items.push(text);
-        }
-
-        let win = UiWindow::new(pos);
-
-        UiList {
-            window: win,
-            items: text_items,
-            selected: 0,
-        }
-    }
-
-    pub fn select_next(&mut self) {
-        if self.selected == self.items.len() - 1 {
-            return;
-        }
-        self.selected += 1;
-    }
-
-    pub fn select_prev(&mut self) {
-        if self.selected == 0 {
-            return;
-        }
-        self.selected -= 1;
-    }
-
-    pub fn get_selected(&self) -> Option<&UiText> {
-        self.items.get(self.selected)
-    }
-}
-
-impl UiElement for UiList {
-    fn draw(&self, renderer: &mut UiRenderer) {
-        self.window.draw(renderer);
-        for item in self.items.iter() {
-            item.draw(renderer);
-        }
-        if let Some(item) = self.get_selected() {
-            let (ix, iy) = item.pos;
-            renderer.add_tex("win", (ix - 16, iy - 12), None, (96, 24), (16, 16));
-        }
-    }
-}
-
-pub struct Callback(Rc<Box<Fn(&mut Ui)>>);
-
-impl Callback {
-    pub fn from_fn<F: Fn(&mut Ui) + 'static>(f: F) -> Self {
-        Callback(Rc::new(Box::new(f)))
-    }
-}
-
-impl Deref for Callback {
-    type Target = Box<Fn(&mut Ui)>;
-    fn deref<'a>(&'a self) -> &'a Box<Fn(&mut Ui)> {
-        &self.0
-    }
-}
-
-impl From<Rc<Box<Fn(&mut Ui)>>> for Callback {
-    fn from(f: Rc<Box<Fn(&mut Ui)>>) -> Self {
-        Callback(f)
-    }
-}
-
-impl From<Box<Fn(&mut Ui) + Send>> for Callback {
-    fn from(f: Box<Fn(&mut Ui) + Send>) -> Self {
-        Callback(Rc::new(f))
-    }
-}
-
-impl From<Box<Fn(&mut Ui)>> for Callback {
-    fn from(f: Box<Fn(&mut Ui)>) -> Self {
-        Callback(Rc::new(f))
-    }
-}
-
-pub enum EventResult {
-    Ignored,
-    Consumed(Option<Callback>),
-    Done
-}
-
-pub trait UiLayer: UiElement {
-    fn on_event(&mut self, event: glutin::Event) -> EventResult;
-}
-
-pub struct InvLayer {
-    list: UiList,
-}
-
-impl InvLayer {
-    pub fn new() -> Self {
-        InvLayer {
-            list: UiList::new((100, 100), vec!["Dood", "Hello, my dear", "end of days", "something", "something else", "starfruit"]),
-        }
-    }
-}
-
-impl UiElement for InvLayer {
-    fn draw(&self, renderer: &mut UiRenderer) {
-        self.list.draw(renderer);
-    }
-}
-
-use glium::glutin::{VirtualKeyCode, ElementState};
-
-impl UiLayer for InvLayer {
-    fn on_event(&mut self, event: glutin::Event) -> EventResult {
-        match event {
-            glutin::Event::KeyboardInput(ElementState::Pressed, _, Some(code)) => {
-                match code {
-                    VirtualKeyCode::Escape |
-                    VirtualKeyCode::Return |
-                    VirtualKeyCode::Q => {
-                        EventResult::Done
-                    },
-                    VirtualKeyCode::Up => {
-                        self.list.select_prev();
-                        EventResult::Consumed(None)
-                    },
-                    VirtualKeyCode::Down => {
-                        self.list.select_next();
-                        println!("{}", self.list.selected);
-                        EventResult::Consumed(None)
-                    },
-                    _ => EventResult::Ignored,
-                }
-            },
-            _ => EventResult::Ignored,
-        }
-    }
-}
-
-impl UiQuery for InvLayer {
-    type QueryResult = String;
-
-    fn result(&self) -> String {
-        self.list.get_selected().unwrap().text()
-    }
-}
-
-pub trait UiQuery: UiLayer {
-    type QueryResult;
-
-    fn result(&self) -> Self::QueryResult;
 }

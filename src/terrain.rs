@@ -1,5 +1,3 @@
-use rand::{self, Rng};
-
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub enum Feature {
     Door,

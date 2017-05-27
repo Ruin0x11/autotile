@@ -2,17 +2,15 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::path::Path;
 
-use glium;
 use glium::backend::Facade;
-use image::{self, DynamicImage, GenericImage, Rgba};
+use image::{self, DynamicImage, Rgba};
 use texture_packer::Rect;
 use texture_packer::SkylinePacker;
 use texture_packer::{TexturePacker, TexturePackerConfig};
 use texture_packer::importer::ImageImporter;
 use texture_packer::exporter::ImageExporter;
-use atlas_frame::Texture2d;
 
-use util;
+use atlas::{self, Texture2d};
 
 pub struct TextureAtlas {
     texture: Texture2d,
@@ -58,7 +56,7 @@ impl<'a> TextureAtlasBuilder<'a> {
     }
 
     pub fn add_texture(&'a mut self, texture_name: &str) -> &'a mut Self {
-        let path_str = format!("./data/texture/{}.png", &texture_name);
+        let path_str = format!("data/texture/{}.png", &texture_name);
         let path = Path::new(&path_str);
         let texture = ImageImporter::import_from_file(&path).unwrap();
 
@@ -75,7 +73,7 @@ impl<'a> TextureAtlasBuilder<'a> {
         let mut file = File::create("data/pack.png").unwrap();
         image.save(&mut file, image::PNG).unwrap();
 
-        let texture = util::make_texture(display, image);
+        let texture = atlas::make_texture(display, image);
         let dim = texture.dimensions();
 
         let mut frames = HashMap::new();

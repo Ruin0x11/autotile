@@ -1,13 +1,4 @@
-use std::fs::File;
-use std::path::PathBuf;
-use std::io::Read;
-
-use glium;
-use glium::backend::Facade;
-use image::{DynamicImage, GenericImage};
-use toml::Value;
-
-use atlas_frame::Texture2d;
+use std::time::Duration;
 
 pub mod toml;
 
@@ -21,8 +12,7 @@ pub fn read_string(path: &str) -> String {
     s
 }
 
-pub fn make_texture<F: Facade>(display: &F, image: DynamicImage) -> Texture2d {
-    let dimensions = image.dimensions();
-    let image = glium::texture::RawImage2d::from_raw_rgba_reversed(image.to_rgba().into_raw(), dimensions);
-    Texture2d::new(display, image).unwrap()
+pub fn get_duration_millis(duration: &Duration) -> u64 {
+    let nanos = duration.subsec_nanos() as u64;
+    (1000*1000*1000 * duration.as_secs() + nanos)/(1000 * 1000)
 }
