@@ -161,21 +161,7 @@ fn make_map(map: &Board) -> Vec<(DrawTile, Point)> {
 
 impl TileMap {
     pub fn new<F: Facade>(display: &F, image_filename: &str) -> Self {
-        let mut builder = TileManagerBuilder::new();
-        builder.add_frame(image_filename, (48, 48));
-        builder.add_frame("./data/map2.png", (48, 48));
-
-        let tile_manager = builder.add_tile(image_filename, 0, AtlasTile {
-            offset: (6, 0),
-            is_autotile: true,
-            tile_kind: TileKind::Static,
-        })
-            .add_tile("./data/map2.png", 1, AtlasTile {
-                offset: (0, 0),
-                is_autotile: true,
-                tile_kind: TileKind::Animated(3, 400),
-            })
-            .build(display);
+        let tile_manager = TileManager::from_config(display, "./data/tiles.toml");
 
         let vertices = glium::VertexBuffer::immutable(display, &QUAD).unwrap();
         let indices = glium::IndexBuffer::immutable(display, PrimitiveType::TrianglesList, &QUAD_INDICES).unwrap();

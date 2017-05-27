@@ -1,7 +1,8 @@
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{self, File};
 use std::path::Path;
 
+use atlas_config;
 use glium;
 use glium::backend::Facade;
 use image::{self, DynamicImage, GenericImage, Rgba};
@@ -13,31 +14,50 @@ use texture_packer::exporter::ImageExporter;
 
 use util;
 
-type TileOffset = (u32, u32);
-type TileIndex = usize;
+pub type TileOffset = (u32, u32);
+pub type TileIndex = usize;
 
 pub type Texture2d = glium::texture::CompressedSrgbTexture2d;
 
 type AnimFrames = u64;
 type AnimMillisDelay = u64;
-#[derive(Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum TileKind {
     Static,
     Animated(AnimFrames, AnimMillisDelay),
 }
 
-#[derive(Clone)]
+#[derive(Serialize, Deserialize, Clone)]
+pub struct AtlasRect {
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+}
+
+impl From<Rect> for AtlasRect {
+    fn from(rect: Rect) -> AtlasRect {
+        AtlasRect {
+            x: rect.x,
+            y: rect.y,
+            w: rect.w,
+            h: rect.h,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct AtlasTile {
     pub offset: TileOffset,
     pub is_autotile: bool,
     pub tile_kind: TileKind,
 }
 
-#[derive(Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct AtlasFrame {
     tile_size: (u32, u32),
     texture_idx: usize,
-    rect: Rect,
+    rect: AtlasRect,
     offsets: HashMap<TileIndex, AtlasTile>,
 }
 
@@ -46,7 +66,7 @@ impl AtlasFrame {
         AtlasFrame {
             tile_size: tile_size,
             texture_idx: texture_idx,
-            rect: rect,
+            rect: AtlasRect::from(rect),
             offsets: HashMap::new(),
         }
     }
@@ -54,9 +74,15 @@ impl AtlasFrame {
 
 pub type TilePacker<'a> = TexturePacker<'a, DynamicImage, SkylinePacker<Rgba<u8>>>;
 
-pub struct TileManager {
+#[derive(Serialize, Deserialize)]
+pub struct TileManagerConfig {
     locations: HashMap<TileIndex, String>,
     frames: HashMap<String, AtlasFrame>,
+    pub file_hash: String,
+}
+
+pub struct TileManager {
+    config: TileManagerConfig,
     textures: Vec<Texture2d>,
 }
 
@@ -64,20 +90,22 @@ pub struct TileManagerBuilder<'a> {
     locations: HashMap<TileIndex, String>,
     frames: HashMap<String, AtlasFrame>,
     packers: Vec<TilePacker<'a>>,
+    pub file_hash: String,
 }
 
 impl <'a> TileManagerBuilder<'a> {
     pub fn new() -> Self {
-        let mut manager = TileManagerBuilder {
+        let mut builder = TileManagerBuilder {
             locations: HashMap::new(),
             frames: HashMap::new(),
             packers: Vec::new(),
+            file_hash: String::new(),
         };
-        manager.add_packer();
-        manager
+        builder.add_packer();
+        builder
     }
 
-    pub fn add_tile(&'a mut self, path_str: &str, index: TileIndex, tile_data: AtlasTile) -> &'a mut Self {
+    pub fn add_tile(&mut self, path_str: &str, index: TileIndex, tile_data: AtlasTile) {
         let key = path_str.to_string();
         assert!(self.frames.contains_key(&path_str.to_string()));
 
@@ -87,11 +115,13 @@ impl <'a> TileManagerBuilder<'a> {
             frame.offsets.insert(index, tile_data);
             self.locations.insert(index, key);
         }
-
-        self
     }
 
     pub fn add_frame(&mut self, path_string: &str, tile_size: (u32, u32)) {
+        if self.frames.contains_key(path_string) {
+            return;
+        }
+
         let path = Path::new(&path_string);
         let texture = ImageImporter::import_from_file(&path).unwrap();
 
@@ -134,28 +164,57 @@ impl <'a> TileManagerBuilder<'a> {
         self.packers.push(TexturePacker::new_skyline(config));
     }
 
-    pub fn build<F: Facade>(&self, display: &F) -> TileManager {
+    pub fn build<F: Facade>(&self, display: &F, packed_tex_folder: &str) -> TileManager {
         let mut textures = Vec::new();
 
-        for packer in self.packers.iter() {
+        let packed_folder_path = atlas_config::get_config_cache_path(packed_tex_folder);
+
+        if Path::exists(packed_folder_path.as_path()) {
+            fs::remove_dir_all(packed_folder_path.as_path()).unwrap();
+        }
+
+        fs::create_dir_all(packed_folder_path.as_path()).unwrap();
+
+        for (idx, packer) in self.packers.iter().enumerate() {
             let image = ImageExporter::export(packer).unwrap();
-            let mut file = File::create("data/pack.png").unwrap();
+
+            let mut file_path = packed_folder_path.clone();
+            file_path.push(&format!("{}.png", idx));
+
+            let mut file = File::create(file_path).unwrap();
+
             image.save(&mut file, image::PNG).unwrap();
             textures.push(util::make_texture(display, image));
         }
 
-        TileManager {
+        println!("Saved {}", packed_tex_folder);
+
+        let config = TileManagerConfig {
             locations: self.locations.clone(),
             frames: self.frames.clone(),
+            file_hash: self.file_hash.clone(),
+        };
+
+        atlas_config::write_tile_manager_config(&config, packed_tex_folder);
+
+        TileManager {
+            config: config,
             textures: textures,
         }
     }
 }
 
 impl TileManager {
+    pub fn new(config: TileManagerConfig, textures: Vec<Texture2d>) -> Self {
+        TileManager {
+            config: config,
+            textures: textures,
+        }
+    }
+
     fn get_frame(&self, tile_type: TileIndex) -> &AtlasFrame {
-        let tex_name = self.locations.get(&tile_type).unwrap();
-        self.frames.get(tex_name).unwrap()
+        let tex_name = self.config.locations.get(&tile_type).unwrap();
+        self.config.frames.get(tex_name).unwrap()
     }
 
     pub fn get_tile_texture_idx(&self, tile_type: TileIndex) -> usize {
@@ -237,9 +296,21 @@ impl TileManager {
     pub fn passes(&self) -> usize {
         self.textures.len()
     }
+
+    pub fn add_tile(&mut self, path_str: &str, index: TileIndex, tile_data: AtlasTile) {
+        let key = path_str.to_string();
+        assert!(self.config.frames.contains_key(&path_str.to_string()));
+
+        {
+            let mut frame = self.config.frames.get_mut(&key).unwrap();
+            assert!(!frame.offsets.contains_key(&index));
+            frame.offsets.insert(index, tile_data);
+            self.config.locations.insert(index, key);
+        }
+    }
 }
 
-fn get_add_offset(rect: &Rect, tile_size: &(u32, u32)) -> (u32, u32) {
+fn get_add_offset(rect: &AtlasRect, tile_size: &(u32, u32)) -> (u32, u32) {
     let ceil = |a, b| (a + b - 1) / b;
     let cols: u32 = ceil(rect.x, tile_size.0);
     let rows: u32 = ceil(rect.y, tile_size.1);

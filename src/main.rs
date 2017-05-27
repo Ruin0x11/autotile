@@ -1,12 +1,19 @@
-extern crate rusttype;
-extern crate cgmath;
 #[macro_use] extern crate glium;
+extern crate bincode;
+extern crate cgmath;
+extern crate crypto;
 extern crate glium_text;
+extern crate glob;
 extern crate image;
 extern crate rand;
+extern crate rusttype;
 extern crate texture_packer;
+extern crate toml;
+extern crate serde;
+#[macro_use] extern crate serde_derive;
 
 mod atlas_frame;
+mod atlas_config;
 mod background;
 mod board;
 mod font;

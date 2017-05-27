@@ -44,21 +44,7 @@ fn make_map() -> Vec<(DrawSprite, Point)> {
 
 impl SpriteMap {
     pub fn new<F: Facade>(display: &F) -> Self {
-        let mut builder = TileManagerBuilder::new();
-        builder.add_frame("./data/sprite.png", (34, 34));
-        builder.add_frame("./data/sprite2.png", (24, 24));
-
-        let tile_manager = builder.add_tile("./data/sprite.png", 0, AtlasTile {
-            offset: (0, 0),
-            is_autotile: false,
-            tile_kind: TileKind::Static,
-        })
-            .add_tile("./data/sprite2.png", 1, AtlasTile {
-                offset: (0, 0),
-                is_autotile: false,
-                tile_kind: TileKind::Static,
-            })
-            .build(display);
+        let tile_manager = TileManager::from_config(display, "./data/sprites.toml");
 
         let vertices = glium::VertexBuffer::immutable(display, &QUAD).unwrap();
         let indices = glium::IndexBuffer::immutable(display, PrimitiveType::TrianglesList, &QUAD_INDICES).unwrap();
