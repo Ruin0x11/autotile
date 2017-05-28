@@ -1,6 +1,9 @@
 use ui::*;
 use ui::renderer::*;
 
+mod message;
+pub use self::message::UiMessageLog;
+
 pub trait UiElement {
     fn draw(&self, renderer: &mut UiRenderer);
 }

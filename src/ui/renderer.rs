@@ -1,17 +1,15 @@
 use std::fs::File;
 use std::path::Path;
 
-use cgmath;
 use glium;
 use glium::backend::Facade;
 use glium::index::PrimitiveType;
 use glium::Rect;
-use texture_packer;
 
+use atlas::AtlasRect;
 use atlas::font::FontTexture;
 use atlas::texture_atlas::*;
-use render::{Renderable, Viewport};
-use util;
+use render::{self, Renderable, Viewport};
 
 #[derive(Clone, Copy, Debug)]
 pub struct AreaRect {
@@ -78,22 +76,26 @@ struct UiVertex {
 
 implement_vertex!(UiVertex, pos, tex_coords, color);
 
-fn calc_tex_subarea(area: &texture_packer::Rect,
+fn calc_tex_subarea(area: &AtlasRect,
                     tex_pos: (u32, u32),
-                    tex_area: (u32, u32)) -> AreaRect {
+                    tex_area: (u32, u32),
+                    tex_size: (u32, u32)) -> AreaRect {
 
-    let subarea = (tex_pos.0, tex_pos.1, tex_pos.0 + tex_area.0, tex_pos.1 + tex_area.1);
+    let (tw, th) = tex_size;
 
-    let offset_xa = subarea.0 as f32 / area.w as f32;
-    let offset_ya = subarea.1 as f32 / area.h as f32;
-    let offset_xb = subarea.2 as f32 / area.w as f32;
-    let offset_yb = subarea.3 as f32 / area.h as f32;
+    let (ratio_x, ratio_y) = (area.w as f32 / tw as f32, area.h as f32 / th as f32);
+
+    let xa = (area.x + tex_pos.0) as f32;
+    let ya = (area.y + tex_pos.1) as f32;
+    let xb = xa + tex_area.0 as f32;
+    let yb = ya + tex_area.1 as f32;
+    let (w, h) = (area.w as f32, area.h as f32);
 
     AreaRect {
-        x1: area.x as f32 + offset_xa,
-        y1: 1.0 - (area.y as f32 + offset_ya),
-        x2: area.x as f32 + offset_xb,
-        y2: 1.0 - (area.y as f32 + offset_yb),
+        x1:       (xa / w) * ratio_x,
+        y1: 1.0 - (ya / h) * ratio_y,
+        x2:       (xb / w) * ratio_x,
+        y2: 1.0 - (yb / h) * ratio_y,
     }
 }
 
@@ -127,14 +129,11 @@ impl UiRenderer {
 
         let atlas = TextureAtlasBuilder::new()
             .add_texture("win")
+            .add_texture("textwin")
             .build(display);
 
-        let vertex_shader = util::read_string("data/identity.vert");
-        let fragment_shader = util::read_string("data/identity.frag");
-        let program = glium::Program::from_source(display, &vertex_shader, &fragment_shader, None).unwrap();
-
-        let font_fragment_shader = util::read_string("data/font.frag");
-        let font_program = glium::Program::from_source(display, &vertex_shader, &font_fragment_shader, None).unwrap();
+        let program = render::load_program(display, "identity.vert", "identity.frag").unwrap();
+        let font_program = render::load_program(display, "identity.vert", "font.frag").unwrap();
 
         UiRenderer {
             ui_atlas: atlas,
@@ -208,7 +207,8 @@ impl UiRenderer {
         let tex_coords = match kind {
             TexKind::Elem(key, tex_pos, tex_area) => {
                 let atlas_area = self.ui_atlas.get_texture_area(key);
-                calc_tex_subarea(atlas_area, tex_pos, tex_area)
+                let tex_size = self.ui_atlas.get_texture().dimensions();
+                calc_tex_subarea(atlas_area, tex_pos, tex_area, tex_size)
             },
             TexKind::Font(coords) => coords,
         };
@@ -366,8 +366,7 @@ impl<'a> Renderable for UiRenderer {
     fn render<F, S>(&self, display: &F, target: &mut S, viewport: &Viewport, msecs: u64)
         where F: glium::backend::Facade, S: glium::Surface {
 
-        let (w, h) = (viewport.size.0 as f32, viewport.size.1 as f32);
-        let proj: [[f32; 4]; 4] = cgmath::ortho(0.0, w, h, 0.0, -1.0, 1.0).into();
+        let proj = viewport.static_projection();
 
         let vertices = glium::VertexBuffer::dynamic(display, &self.draw_list.vertices).unwrap();
 

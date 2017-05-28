@@ -1,15 +1,13 @@
 use glium;
 use glium::backend::Facade;
 use glium::index::PrimitiveType;
-use cgmath;
 
 use atlas::*;
 use board::Board;
 use point::Direction;
 use point::Point;
 use point;
-use util;
-use render::{Renderable, Viewport, Vertex, QUAD, QUAD_INDICES};
+use render::{self, Renderable, Viewport, Vertex, QUAD, QUAD_INDICES};
 
 #[derive(Copy, Clone)]
 struct Instance {
@@ -57,13 +55,11 @@ fn get_neighboring_edges(map: &Board, pos: Point) -> u8 {
     let mut res: u8 = 0;
     for dir in point::DIRECTIONS.iter() {
         let new_pos = pos + *dir;
-        println!("{} {:?} {} {:?}", pos, dir, new_pos, map.get(&new_pos));
         let same_type = map.get(&new_pos) == my_type;
         if same_type {
             res |= 1 << dir_to_bit(*dir);
         }
     }
-    println!("Done");
     res
 }
 
@@ -152,9 +148,7 @@ impl TileMap {
         let vertices = glium::VertexBuffer::immutable(display, &QUAD).unwrap();
         let indices = glium::IndexBuffer::immutable(display, PrimitiveType::TrianglesList, &QUAD_INDICES).unwrap();
 
-        let vertex_shader = util::read_string("data/tile.vert");
-        let fragment_shader = util::read_string("data/tile.frag");
-        let program = glium::Program::from_source(display, &vertex_shader, &fragment_shader, None).unwrap();
+        let program = render::load_program(display, "tile.vert", "tile.frag").unwrap();
 
         TileMap {
             map: Vec::new(),
@@ -202,9 +196,7 @@ impl<'a> Renderable for TileMap {
     fn render<F, S>(&self, display: &F, target: &mut S, viewport: &Viewport, msecs: u64)
         where F: glium::backend::Facade, S: glium::Surface {
 
-        let (w, h) = (viewport.size.0 as f32, viewport.size.1 as f32);
-        let (x, y) = (viewport.camera.0 as f32, viewport.camera.1 as f32);
-        let proj: [[f32; 4]; 4] = cgmath::ortho(x, w + x, h + y, y, -1.0, 1.0).into();
+        let (proj, scissor) = viewport.main_window();
 
         for pass in 0..self.tile_manager.passes() {
             let texture = self.tile_manager.get_texture(pass);
@@ -222,14 +214,9 @@ impl<'a> Renderable for TileMap {
 
             let instances = self.create_instances(display, pass, msecs);
 
-            // TODO move to arguments?
             let params = glium::DrawParameters {
                 blend: glium::Blend::alpha_blending(),
-                // viewport: {
-                //     let (x, y) = viewport.position;
-                //     let (w, h) = viewport.size;
-                //     Some(glium::Rect { left: x, bottom: y, width: w, height: h })
-                // },
+                scissor: Some(scissor),
                 .. Default::default()
             };
 

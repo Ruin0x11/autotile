@@ -10,11 +10,11 @@ use texture_packer::{TexturePacker, TexturePackerConfig};
 use texture_packer::importer::ImageImporter;
 use texture_packer::exporter::ImageExporter;
 
-use atlas::{self, Texture2d};
+use atlas::{self, AtlasRect, Texture2d};
 
 pub struct TextureAtlas {
     texture: Texture2d,
-    frames: HashMap<String, Rect>,
+    frames: HashMap<String, AtlasRect>,
 }
 
 type TextureAtlasPacker<'a> = TexturePacker<'a, DynamicImage, SkylinePacker<Rgba<u8>>>;
@@ -22,19 +22,6 @@ type TextureAtlasPacker<'a> = TexturePacker<'a, DynamicImage, SkylinePacker<Rgba
 pub struct TextureAtlasBuilder<'a> {
     packer: TextureAtlasPacker<'a>,
     frames: HashMap<String, Rect>,
-}
-
-pub struct TextureRect {
-    uv: (f32, f32, f32, f32)
-}
-
-impl TextureRect {
-    fn from_atlas_rect(dim: (u32, u32), rect: &Rect) -> Self {
-        TextureRect {
-            uv: (rect.x as f32 / dim.0 as f32, rect.y as f32 / dim.1 as f32,
-                 rect.w as f32 / dim.0 as f32, rect.h as f32 / dim.1 as f32),
-        }
-    }
 }
 
 impl<'a> TextureAtlasBuilder<'a> {
@@ -74,16 +61,15 @@ impl<'a> TextureAtlasBuilder<'a> {
         image.save(&mut file, image::PNG).unwrap();
 
         let texture = atlas::make_texture(display, image);
-        let dim = texture.dimensions();
 
         let mut frames = HashMap::new();
         for (key, frame) in self.frames.iter() {
-            frames.insert(key.clone(), TextureRect::from_atlas_rect(dim, frame));
+            frames.insert(key.clone(), AtlasRect::from(*frame));
         }
 
         TextureAtlas {
             texture: texture,
-            frames: self.frames.clone(),
+            frames: frames,
         }
     }
 }
@@ -93,7 +79,7 @@ impl TextureAtlas {
         &self.texture
     }
 
-    pub fn get_texture_area(&self, key: &str) -> &Rect {
+    pub fn get_texture_area(&self, key: &str) -> &AtlasRect {
         self.frames.get(key).unwrap()
     }
 }

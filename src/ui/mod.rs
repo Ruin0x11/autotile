@@ -12,26 +12,45 @@ pub use self::elements::{UiElement};
 pub use self::renderer::UiRenderer;
 pub use self::layer::{EventResult, UiLayer, UiQuery};
 
-// 1. update state somehow
-// 2. output vertices of texture coordinates inside UI texture atlas
+use ui::elements::UiMessageLog;
+pub struct MainLayer {
+    log: UiMessageLog,
+}
 
-// self.bar.update(BarData { current: 100, max: 1000 }):
-// drawlist.extend(self.bar.output());
+impl MainLayer {
+    pub fn new() -> Self {
+        MainLayer {
+            log: UiMessageLog::new(),
+        }
+    }
+}
 
-// For text, use the font atlas and output one texture piece for each glyph
+impl UiElement for MainLayer {
+    fn draw(&self, renderer: &mut UiRenderer) {
+        self.log.draw(renderer);
+    }
+}
+
+impl UiLayer for MainLayer {
+    fn on_event(&mut self, event: glutin::Event) -> EventResult {
+        EventResult::Ignored
+    }
+}
 
 pub struct Ui {
     renderer: UiRenderer,
     valid: bool,
     layers: Vec<Box<UiLayer>>,
+    main_layer: MainLayer,
 }
 
 impl Ui {
     pub fn new<F: Facade>(display: &F) -> Self {
         Ui {
             renderer: UiRenderer::new(display),
-            valid: true,
+            valid: false,
             layers: Vec::new(),
+            main_layer: MainLayer::new(),
         }
     }
 
@@ -58,7 +77,11 @@ impl Ui {
         self.valid = true;
     }
 
-    pub fn update(&mut self, event: glutin::Event) {
+    pub fn update(&mut self) {
+        self.redraw();
+    }
+
+    pub fn on_event(&mut self, event: glutin::Event) {
         let result = match self.layers.last_mut() {
             None => EventResult::Ignored,
             Some(layer) => layer.on_event(event),
@@ -75,17 +98,23 @@ impl Ui {
             }
             EventResult::Done => self.pop_layer(),
         }
+    }
 
-        self.redraw();
+    pub fn render_all(&mut self) {
+            self.renderer.clear();
+
+            println!("Draw main");
+            self.main_layer.draw(&mut self.renderer);
+            println!("Draw next");
+
+            for layer in self.layers.iter() {
+                layer.draw(&mut self.renderer);
+            }
     }
 
     fn redraw(&mut self) {
         if !self.valid {
-            self.renderer.clear();
-            for layer in self.layers.iter() {
-                layer.draw(&mut self.renderer);
-            }
-
+            self.render_all();
             self.valid = true;
         }
     }

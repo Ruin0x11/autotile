@@ -120,8 +120,7 @@ fn main() {
                 _ => (),
             }
 
-            if ctxt.ui_active() {
-                ctxt.update_ui(event);
+            if ctxt.update_ui(&event) {
                 return Action::Continue;
             }
 

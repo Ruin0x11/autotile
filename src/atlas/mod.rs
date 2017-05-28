@@ -30,12 +30,12 @@ pub enum TileKind {
     Animated(AnimFrames, AnimMillisDelay),
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AtlasRect {
-    x: u32,
-    y: u32,
-    w: u32,
-    h: u32,
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
 }
 
 impl From<Rect> for AtlasRect {

@@ -5,8 +5,7 @@ use cgmath;
 
 use atlas::*;
 use point::Point;
-use render::{Renderable, Viewport, Vertex, QUAD, QUAD_INDICES};
-use util;
+use render::{self, Renderable, Viewport, Vertex, QUAD, QUAD_INDICES};
 
 #[derive(Copy, Clone)]
 struct Instance {
@@ -49,9 +48,7 @@ impl SpriteMap {
         let vertices = glium::VertexBuffer::immutable(display, &QUAD).unwrap();
         let indices = glium::IndexBuffer::immutable(display, PrimitiveType::TrianglesList, &QUAD_INDICES).unwrap();
 
-        let vertex_shader = util::read_string("data/sprite.vert");
-        let fragment_shader = util::read_string("data/sprite.frag");
-        let program = glium::Program::from_source(display, &vertex_shader, &fragment_shader, None).unwrap();
+        let program = render::load_program(display, "sprite.vert", "sprite.frag").unwrap();
 
         let sprites = make_map();
 
@@ -92,9 +89,7 @@ impl<'a> Renderable for SpriteMap {
     fn render<F, S>(&self, display: &F, target: &mut S, viewport: &Viewport, msecs: u64)
         where F: glium::backend::Facade, S: glium::Surface {
 
-        let (w, h) = (viewport.size.0 as f32, viewport.size.1 as f32);
-        let (x, y) = (viewport.camera.0 as f32, viewport.camera.1 as f32);
-        let proj: [[f32; 4]; 4] = cgmath::ortho(x, w + x, h + y, y, -1.0, 1.0).into();
+        let (proj, scissor) = viewport.main_window();
 
         for pass in 0..self.tile_manager.passes() {
             let texture = self.tile_manager.get_texture(pass);
@@ -112,6 +107,7 @@ impl<'a> Renderable for SpriteMap {
 
             let params = glium::DrawParameters {
                 blend: glium::Blend::alpha_blending(),
+                scissor: Some(scissor),
                 .. Default::default()
             };
 
