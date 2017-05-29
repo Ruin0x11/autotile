@@ -16,7 +16,7 @@ use atlas::Texture2d;
 /// Texture which contains the characters of the font.
 pub struct FontTexture {
     texture: Texture2d,
-    character_infos: HashMap<char, CharacterInfos>,
+    character_glyphs: HashMap<char, Glyph>,
     font_size: u32,
 }
 
@@ -28,7 +28,7 @@ pub enum Error {
 
 // structure containing informations about a character of a font
 #[derive(Copy, Clone, Debug)]
-pub struct CharacterInfos {
+pub struct Glyph {
     // coordinates of the character top-left hand corner on the font's texture
     pub tex_coords: (f32, f32),
 
@@ -46,6 +46,12 @@ pub struct CharacterInfos {
 
     // number of EMs at the right of the character
     pub right_padding: f32,
+}
+
+impl Glyph {
+    pub fn width(&self) -> f32 {
+        self.left_padding + self.size.0 + self.right_padding
+    }
 }
 
 struct TextureData {
@@ -97,8 +103,8 @@ impl FontTexture {
         let collection = ::rusttype::FontCollection::from_bytes(&font[..]);
         let font = collection.into_font().unwrap();
 
-        // building the infos
-        let (texture_data, chr_infos) =
+        // building the glyphs
+        let (texture_data, chr_glyphs) =
             build_font_image(font, characters_list.into_iter(), font_size)?;
 
         // we load the texture in the display
@@ -106,7 +112,7 @@ impl FontTexture {
 
         Ok(FontTexture {
             texture: texture,
-            character_infos: chr_infos,
+            character_glyphs: chr_glyphs,
             font_size: font_size,
         })
     }
@@ -119,14 +125,55 @@ impl FontTexture {
         self.font_size
     }
 
-    pub fn find_infos(&self, character: char) -> Option<CharacterInfos> {
-        self.character_infos.iter().find(|&(chr, _)| *chr == character).map(|(_, &infos)| infos)
+    pub fn find_glyph(&self, character: char) -> Option<Glyph> {
+        self.character_glyphs.iter().find(|&(chr, _)| *chr == character).map(|(_, &glyph)| glyph)
+    }
+
+    pub fn text_width_ems(&self, text: &str) -> f32 {
+        text.chars()
+            .map(|c| self.find_glyph(c).unwrap())
+            .fold(0.0, |total, glyph| total + (glyph.width()))
+    }
+
+    pub fn text_width_px(&self, text: &str) -> u32 {
+        (self.text_width_ems(text) * self.font_size as f32) as u32
+    }
+
+    pub fn wrap_text(&self, text: &str, wraplimit_px: u32) -> Vec<String> {
+        let wraplimit_ems = wraplimit_px as f32 / self.font_size as f32;
+
+        let words: Vec<String> = text.split(" ").map(|s| s.to_string()).collect();
+
+        if words.len() == 0 {
+            return Vec::new();
+        }
+
+        let mut lines = Vec::new();
+        let mut wrapped = words[0].clone();
+        let mut space_left = wraplimit_ems - self.text_width_ems(&wrapped);
+
+        for word in words.into_iter().skip(1) {
+            let length = self.text_width_ems(&word) + self.text_width_ems(" ");;
+            if length > space_left {
+                lines.push(wrapped);
+                wrapped = word;
+                space_left = wraplimit_ems - length;
+            } else {
+                wrapped.push_str(&format!(" {}", word));
+                space_left -= length;
+            }
+        }
+
+        lines.push(wrapped);
+        lines.reverse();
+
+        lines
     }
 }
 
 
 fn build_font_image<I>(font: rusttype::Font, characters_list: I, font_size: u32)
-                       -> Result<(TextureData, HashMap<char, CharacterInfos>), Error>
+                       -> Result<(TextureData, HashMap<char, Glyph>), Error>
     where I: Iterator<Item=char>
 {
     use std::iter;
@@ -149,7 +196,7 @@ fn build_font_image<I>(font: rusttype::Font, characters_list: I, font_size: u32)
     // everything as long as the texture is at least as wide as the widest
     // character we just try to estimate a width so that width ~= height
     let texture_width = get_nearest_po2(std::cmp::max(font_size * 2 as u32,
-        ((((size_estimation as u32) * font_size * font_size) as f32).sqrt()) as u32));
+                                                      ((((size_estimation as u32) * font_size * font_size) as f32).sqrt()) as u32));
 
     // we store the position of the "cursor" in the destination texture
     // this cursor points to the top-left pixel of the next character to write on the texture
@@ -170,7 +217,7 @@ fn build_font_image<I>(font: rusttype::Font, characters_list: I, font_size: u32)
         // hope scale will set the right pixel size
         let scaled_glyph = font.glyph(character)
             .ok_or_else(|| Error::NoGlyph(character))?
-            .scaled(::rusttype::Scale {x : font_size as f32, y : font_size as f32 });
+        .scaled(::rusttype::Scale {x : font_size as f32, y : font_size as f32 });
         let h_metrics = scaled_glyph.h_metrics();
         let glyph = scaled_glyph
             .positioned(::rusttype::Point {x : 0.0, y : 0.0 });
@@ -245,7 +292,7 @@ fn build_font_image<I>(font: rusttype::Font, characters_list: I, font_size: u32)
         // filling infos about that character
         // tex_size and tex_coords are in pixels for the moment ; they will be divided
         // by the texture dimensions later
-        Ok((character, CharacterInfos {
+        Ok((character, Glyph {
             tex_size: (bitmap.width as f32, bitmap.rows as f32),
             tex_coords: (offset_x_before_copy as f32, cursor_offset.1 as f32),
             size: (bitmap.width as f32, bitmap.rows as f32),

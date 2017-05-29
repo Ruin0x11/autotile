@@ -1,7 +1,7 @@
 use std::collections::HashSet;
-use std::time::Duration;
+use std::thread;
+use std::time::{Duration, Instant};
 
-use cgmath;
 use glium;
 use glium::glutin;
 use glium::{DisplayBuild, Surface};
@@ -17,11 +17,13 @@ use self::background::Background;
 use self::shadowmap::ShadowMap;
 use self::spritemap::SpriteMap;
 use self::tilemap::TileMap;
+pub use self::viewport::Viewport;
 
 mod background;
 mod shadowmap;
 mod spritemap;
 mod tilemap;
+mod viewport;
 
 pub fn load_program<F: Facade>(display: &F, vert: &str, frag: &str) -> Result<glium::Program, glium::ProgramCreationError> {
     let vertex_shader = util::read_string(&format!("data/shaders/{}", vert));
@@ -48,63 +50,6 @@ pub struct Vertex {
 
 implement_vertex!(Vertex, position);
 
-#[derive(Debug)]
-pub struct Viewport {
-    pub position: (u32, u32),
-    pub size: (u32, u32),
-    pub scale: f32,
-    pub camera: (i32, i32),
-}
-
-pub type RendererSubarea = ([[f32; 4]; 4], glium::Rect);
-
-impl Viewport {
-    pub fn main_window(&self) -> RendererSubarea {
-        let (w, h) = self.scaled_size();
-        self.make_subarea((0, 0, w, h - 120))
-    }
-
-    pub fn scaled_size(&self) -> (u32, u32) {
-        ((self.size.0 as f32 * self.scale) as u32, (self.size.1 as f32 * self.scale) as u32)
-    }
-
-    fn make_subarea(&self, area: (u32, u32, u32, u32)) -> RendererSubarea {
-        (self.camera_projection(), self.scissor(area))
-    }
-
-    pub fn static_projection(&self) -> [[f32; 4]; 4] {
-        self.make_projection_matrix((0, 0))
-    }
-
-    pub fn camera_projection(&self) -> [[f32; 4]; 4] {
-        self.make_projection_matrix(self.camera)
-    }
-
-    fn make_projection_matrix(&self, offset: (i32, i32)) -> [[f32; 4]; 4] {
-        let (w, h) = (self.size.0 as f32, self.size.1 as f32);
-        let (x, y) = (offset.0 as f32, offset.1 as f32);
-
-        let left = x;
-        let right = x + w;
-        let bottom = y + h;
-        let top = y;
-
-        cgmath::ortho(left, right, bottom, top, -1.0, 1.0).into()
-    }
-
-    fn scissor(&self, area: (u32, u32, u32, u32)) -> glium::Rect {
-        let (ax, ay, aw, ah) = area;
-        let (_, h) = self.scaled_size();
-        let conv = |i| (i as f32 * self.scale) as u32;
-
-        glium::Rect { left:   conv(ax),
-                      bottom: conv(ay) + conv(h - ah),
-                      width:  conv(aw - ax),
-                      height: conv(ah) - conv(ay * 2),
-        }
-    }
-}
-
 pub struct RenderContext {
     backend: GlutinFacade,
     ui: Ui,
@@ -114,7 +59,7 @@ pub struct RenderContext {
     tilemap: TileMap,
     shadowmap: ShadowMap,
 
-    // msecs_elapsed: u64,
+    accumulator: FpsAccumulator,
     pub viewport: Viewport,
 }
 
@@ -142,6 +87,8 @@ impl RenderContext {
 
         let scale = display.get_window().unwrap().hidpi_factor();
 
+        let accumulator = FpsAccumulator::new();
+
         let viewport = Viewport {
             position: (0, 0),
             size: (SCREEN_WIDTH, SCREEN_HEIGHT),
@@ -156,7 +103,21 @@ impl RenderContext {
             shadowmap: shadow,
             spritemap: sprite,
             tilemap: tile,
+            accumulator: accumulator,
             viewport: viewport,
+        }
+    }
+
+    pub fn start_loop<F>(&mut self, mut callback: F) where F: FnMut(&mut RenderContext) -> Action {
+        loop {
+            match callback(self) {
+                Action::Stop => break,
+                Action::Continue => ()
+            };
+
+            self.accumulator.step_frame();
+
+            thread::sleep(self.accumulator.sleep_time());
         }
     }
 
@@ -168,11 +129,11 @@ impl RenderContext {
         self.background.refresh_shaders(&self.backend);
     }
 
-    pub fn render(&mut self, duration: &Duration) {
+    pub fn render(&mut self) {
         let mut target = self.backend.draw();
         target.clear_color_and_depth((0.0, 0.0, 0.0, 0.0), 1.0);
 
-        let millis = util::get_duration_millis(duration);
+        let millis = self.accumulator.millis_since_start();
 
         self.background.render(&self.backend, &mut target, &self.viewport, millis);
         self.tilemap.render(&self.backend, &mut target, &self.viewport, millis);
@@ -207,6 +168,15 @@ impl RenderContext {
         }
     }
 
+    pub fn message(&mut self, text: &str) {
+        self.ui.main_layer.log.append(text);
+        self.ui.invalidate();
+    }
+
+    pub fn next_line(&mut self) {
+        self.ui.main_layer.log.next_line();
+    }
+
     pub fn query<R, T: 'static + UiQuery<QueryResult=R>>(&mut self, layer: &mut T) -> R {
         loop {
             for event in self.backend.poll_events() {
@@ -222,7 +192,8 @@ impl RenderContext {
                 }
             }
 
-            self.render(&Duration::new(0, 0));
+            self.render();
+            self.accumulator.step_frame();
         }
     }
 }
@@ -230,4 +201,60 @@ impl RenderContext {
 pub trait Renderable {
     fn render<F, S>(&self, display: &F, target: &mut S, viewport: &Viewport, msecs: u64)
         where F: glium::backend::Facade, S: glium::Surface;
+}
+
+pub enum Action {
+    Stop,
+    Continue,
+}
+
+pub struct FpsAccumulator {
+    start: Instant,
+    frame_count: u32,
+    last_time: u64,
+    accumulator: Duration,
+    previous_clock: Instant,
+}
+
+impl FpsAccumulator {
+    pub fn new() -> Self {
+        FpsAccumulator {
+            start: Instant::now(),
+            frame_count: 0,
+            last_time: 0,
+            accumulator: Duration::new(0, 0),
+            previous_clock: Instant::now(),
+        }
+    }
+
+    pub fn step_frame(&mut self) {
+        let now = Instant::now();
+        self.accumulator += now - self.previous_clock;
+        self.previous_clock = now;
+
+        let fixed_time_stamp = Duration::new(0, 16666667);
+        while self.accumulator >= fixed_time_stamp {
+            self.accumulator -= fixed_time_stamp;
+        }
+
+        let millis = util::get_duration_millis(&Instant::now().duration_since(self.start));
+
+        if millis - self.last_time >= 1000 {
+            let ms_per_frame = 1000.0 / self.frame_count as f32;
+            println!("{} ms/frame | {} fps", ms_per_frame, 1000.0 / ms_per_frame);
+            self.frame_count = 0;
+            self.last_time += 1000;
+        }
+
+        self.frame_count += 1;
+    }
+
+    pub fn sleep_time(&self) -> Duration {
+        Duration::new(0, 16666667) - self.accumulator
+    }
+
+    pub fn millis_since_start(&self) -> u64 {
+        let duration = Instant::now().duration_since(self.start);
+        util::get_duration_millis(&duration)
+    }
 }

@@ -116,6 +116,16 @@ pub struct UiRenderer {
     draw_list: UiDrawList,
     program: glium::Program,
     font_program: glium::Program,
+
+    color_stack: Vec<(u8, u8, u8, u8)>,
+}
+
+fn build_ui_atlas<F: Facade>(display: &F) -> TextureAtlas {
+    TextureAtlasBuilder::new()
+        .add_texture("win")
+        .add_texture("textwin")
+        .add_texture("bar")
+        .build(display)
 }
 
 impl UiRenderer {
@@ -127,11 +137,7 @@ impl UiRenderer {
                                     font_size,
                                     FontTexture::ascii_character_list()).unwrap();
 
-        let atlas = TextureAtlasBuilder::new()
-            .add_texture("win")
-            .add_texture("textwin")
-            .build(display);
-
+        let atlas = build_ui_atlas(display);
         let program = render::load_program(display, "identity.vert", "identity.frag").unwrap();
         let font_program = render::load_program(display, "identity.vert", "font.frag").unwrap();
 
@@ -141,6 +147,7 @@ impl UiRenderer {
             draw_list: UiDrawList::new(),
             program: program,
             font_program: font_program,
+            color_stack: Vec::new(),
         }
     }
 
@@ -150,6 +157,24 @@ impl UiRenderer {
 
     pub fn get_font_size(&self) -> u32 {
         self.font.get_font_size()
+    }
+
+    pub fn font(&self) -> &FontTexture {
+        &self.font
+    }
+
+    pub fn with_color<F>(&mut self, color: (u8, u8, u8, u8), callback: F)
+        where F: FnOnce(&mut UiRenderer) {
+        self.color_stack.push(color);
+        callback(self);
+        self.color_stack.pop();
+    }
+
+    pub fn get_color(&self) -> (u8, u8, u8, u8) {
+        match self.color_stack.last() {
+            Some(color) => *color,
+            None => (255, 255, 255, 255),
+        }
     }
 
     pub fn repeat_tex(&mut self, key: &'static str,
@@ -187,11 +212,12 @@ impl UiRenderer {
         for _ in 0..(repeats_h + 1) {
             for _ in 0..(repeats_v + 1) {
                 let screen_pos = (x, y, x + tw, y + th);
+                let color = self.get_color();
 
                 self.add_tex_internal(TexKind::Elem(key, tex_pos, tex_area),
                                       screen_pos,
                                       Some(clipping_rect),
-                                      (255, 255, 255, 255));
+                                      color);
 
                 y += th;
             }
@@ -281,11 +307,12 @@ impl UiRenderer {
         let (tw, th) = tex_area;
 
         let true_screen_pos = (sx, sy, sx + tw as i32, sy + th as i32);
+        let color = self.get_color();
 
         self.add_tex_internal(TexKind::Elem(key, tex_pos, tex_area),
                               true_screen_pos,
                               clip_rect,
-                              (255, 255, 255, 255));
+                              color);
     }
 
     pub fn add_tex_stretch(&mut self, key: &'static str,
@@ -293,10 +320,23 @@ impl UiRenderer {
                            clip_rect: Option<(u32, u32, u32, u32)>,
                            tex_pos: (u32, u32),
                            tex_area: (u32, u32)) {
+        let color = self.get_color();
+
         self.add_tex_internal(TexKind::Elem(key, tex_pos, tex_area),
                               screen_pos,
                               clip_rect,
-                              (255, 255, 255, 255));
+                              color);
+    }
+
+    pub fn add_string_shadow(&mut self, screen_pos: (i32, i32),
+                             clipping_rect: Option<(u32, u32, u32, u32)>,
+                             color: (u8, u8, u8, u8),
+                             text: &str) {
+        let shadow_pos = (screen_pos.0 + 1, screen_pos.1 + 1);
+        let color = self.get_color();
+
+        self.add_string(shadow_pos, clipping_rect, (0, 0, 0, 255), text);
+        self.add_string(screen_pos, clipping_rect, color, text);
     }
 
     pub fn add_string(&mut self, screen_pos: (i32, i32),
@@ -320,35 +360,35 @@ impl UiRenderer {
                 total_text_width: f32,
                 color: (u8, u8, u8, u8),
                 ch: char) -> f32 {
-        let infos = match self.font.find_infos(ch) {
-            Some(infos) => infos,
+        let glyph = match self.font.find_glyph(ch) {
+            Some(glyph) => glyph,
             None => return 0.0,
         };
 
         let area = AreaRect {
-            x1: infos.tex_coords.0,
-            y1: infos.tex_coords.1,
-            x2: infos.tex_coords.0 + infos.tex_size.0,
-            y2: infos.tex_coords.1 + infos.tex_size.1,
+            x1: glyph.tex_coords.0,
+            y1: glyph.tex_coords.1,
+            x2: glyph.tex_coords.0 + glyph.tex_size.0,
+            y2: glyph.tex_coords.1 + glyph.tex_size.1,
         };
 
         let pt = self.font.get_font_size() as f32;
 
-        let (ch_width, ch_height) = ((infos.size.0 * pt) as u32, (infos.size.1 * pt) as u32);
+        let (ch_width, ch_height) = ((glyph.size.0 * pt) as u32, (glyph.size.1 * pt) as u32);
 
         // check overflow
-        // if screen_pos.1 < (infos.height_over_line * pt) as i32 {
+        // if screen_pos.1 < (glyph.height_over_line * pt) as i32 {
         //     return added_width;
         // }
 
-        let (sx, sy) = (screen_pos.0 + ((total_text_width + infos.left_padding) * pt) as i32,
-                        screen_pos.1 - (infos.height_over_line * pt) as i32);
+        let (sx, sy) = (screen_pos.0 + ((total_text_width + glyph.left_padding) * pt) as i32,
+                        screen_pos.1 - (glyph.height_over_line * pt) as i32);
 
         let true_pos = (sx, sy, sx + ch_width as i32, sy + ch_height as i32);
 
         self.add_tex_internal(TexKind::Font(area), true_pos, clipping_rect, color);
 
-        infos.size.0 + infos.left_padding + infos.right_padding
+        glyph.size.0 + glyph.left_padding + glyph.right_padding
     }
 }
 

@@ -12,15 +12,17 @@ pub use self::elements::{UiElement};
 pub use self::renderer::UiRenderer;
 pub use self::layer::{EventResult, UiLayer, UiQuery};
 
-use ui::elements::UiMessageLog;
+use ui::elements::{UiBar, UiMessageLog};
 pub struct MainLayer {
-    log: UiMessageLog,
+    pub log: UiMessageLog,
+    pub bar: UiBar,
 }
 
 impl MainLayer {
     pub fn new() -> Self {
         MainLayer {
             log: UiMessageLog::new(),
+            bar: UiBar::new((100, 460), 100, (255, 64, 64, 255)),
         }
     }
 }
@@ -28,6 +30,7 @@ impl MainLayer {
 impl UiElement for MainLayer {
     fn draw(&self, renderer: &mut UiRenderer) {
         self.log.draw(renderer);
+        self.bar.draw(renderer);
     }
 }
 
@@ -41,7 +44,7 @@ pub struct Ui {
     renderer: UiRenderer,
     valid: bool,
     layers: Vec<Box<UiLayer>>,
-    main_layer: MainLayer,
+    pub main_layer: MainLayer,
 }
 
 impl Ui {

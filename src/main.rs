@@ -32,8 +32,7 @@ use board::Board;
 use terrain::Terrain;
 use ui::*;
 use ui::elements::UiList;
-use render::RenderContext;
-
+use render::{Action, RenderContext};
 
 pub struct InvLayer {
     list: UiList,
@@ -65,6 +64,7 @@ impl UiLayer for InvLayer {
                     },
                     VirtualKeyCode::Up => {
                         self.list.select_prev();
+                        println!("Go");
                         EventResult::Consumed(None)
                     },
                     VirtualKeyCode::Down => {
@@ -104,11 +104,11 @@ fn main() {
     board.set(&Point::new(6, 5), Terrain::Wall);
     board.set(&Point::new(6, 7), Terrain::Wall);
 
-    let mut ctxt = RenderContext::new();
+    let mut context = RenderContext::new();
 
-    ctxt.update(&board);
+    context.update(&board);
 
-    start_loop(|duration| {
+    context.start_loop(|ctxt| {
         // polling and handling the events received by the window
         for event in ctxt.poll_events() {
             match event {
@@ -136,6 +136,12 @@ fn main() {
                             let res = ctxt.query(&mut InvLayer::new());
                             println!("{}", res);
                         },
+                        VirtualKeyCode::A => {
+                            ctxt.message("Live, die, repeat.");
+                        },
+                        VirtualKeyCode::N => {
+                            ctxt.next_line();
+                        },
                         VirtualKeyCode::Left => {
                             ctxt.viewport.camera.0 -= 48;
                         },
@@ -158,51 +164,8 @@ fn main() {
             }
         }
 
-        ctxt.render(duration);
+        ctxt.render();
 
         Action::Continue
     })
-}
-pub enum Action {
-    Stop,
-    Continue,
-}
-
-pub fn start_loop<F>(mut callback: F) where F: FnMut(&Duration) -> Action {
-    let start = Instant::now();
-    let mut frame_count: u32 = 0;
-    let mut last_time: u64 = 0;
-    let mut accumulator = Duration::new(0, 0);
-    let mut previous_clock = Instant::now();
-
-    loop {
-        match callback(&Instant::now().duration_since(start)) {
-            Action::Stop => break,
-            Action::Continue => ()
-        };
-
-        let now = Instant::now();
-        accumulator += now - previous_clock;
-        previous_clock = now;
-
-        let fixed_time_stamp = Duration::new(0, 16666667);
-        while accumulator >= fixed_time_stamp {
-            accumulator -= fixed_time_stamp;
-
-            // if you have a game, update the state here
-        }
-
-        let millis = util::get_duration_millis(&Instant::now().duration_since(start));
-
-        if millis - last_time >= 1000 {
-            let ms_per_frame = 1000.0 / frame_count as f32;
-            println!("{} ms/frame | {} fps", ms_per_frame, 1000.0 / ms_per_frame);
-            frame_count = 0;
-            last_time += 1000;
-        }
-
-        thread::sleep(fixed_time_stamp - accumulator);
-
-        frame_count += 1;
-    }
 }
